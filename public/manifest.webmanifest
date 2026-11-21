@@ -1,11 +1,11 @@
 {
-  "name": "Pingo — turn maybe into plans",
-  "short_name": "Pingo",
-  "description": "Ping your people, tap in, and actually show up.",
-  "start_url": "/",
+  "name": "PINGO — messages that land",
+  "short_name": "PINGO",
+  "description": "Private chats, groups, communities, channels and calls in one fast place.",
+  "start_url": "/app/chats",
   "display": "standalone",
-  "background_color": "#f6efe1",
-  "theme_color": "#ea5a2b",
+  "background_color": "#F4F7F8",
+  "theme_color": "#126B78",
   "icons": [
     {
       "src": "/logo.svg",

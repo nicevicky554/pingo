@@ -1,33 +1,62 @@
-import '@vly-ai/integrations';
+import "@vly-ai/integrations";
 import { Toaster } from "@/components/ui/sonner";
-import { RequireAuth } from "@/components/RequireAuth";
+import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient } from "convex/react";
+import { AuthProvider } from "@/providers/AuthProvider";
+import { PresenceProvider } from "@/providers/PresenceProvider";
+import { useAuth } from "@/hooks/use-auth";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router";
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router";
 import "./index.css";
 
-// Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const ChatsPage = lazy(() => import("./pages/app/ChatsPage.tsx"));
+const UpdatesPage = lazy(() => import("./pages/app/UpdatesPage.tsx"));
+const CommunitiesPage = lazy(() => import("./pages/app/CommunitiesPage.tsx"));
+const CallsPage = lazy(() => import("./pages/app/CallsPage.tsx"));
+const SettingsPage = lazy(() => import("./pages/app/SettingsPage.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const AdminSetup = lazy(() => import("./pages/admin/AdminSetup.tsx"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
+const AdminReports = lazy(() => import("./pages/admin/AdminReports.tsx"));
+const AdminAccess = lazy(() => import("./pages/admin/AdminAccess.tsx"));
 
-// Simple loading fallback for route transitions
+const AppShell = lazy(() =>
+  import("@/components/app/AppShell").then((module) => ({
+    default: module.AppShell,
+  })),
+);
+const AppGate = lazy(() =>
+  import("@/components/app/AppGate").then((module) => ({
+    default: module.AppGate,
+  })),
+);
+const AdminShell = lazy(() =>
+  import("@/components/admin/AdminShell").then((module) => ({
+    default: module.AdminShell,
+  })),
+);
+
 function RouteLoading() {
   return (
     <div className="dot-grid flex min-h-screen items-center justify-center bg-background">
-      <div className="animate-pulse font-display text-lg font-bold text-muted-foreground">
-        Warming up the board…
+      <div className="animate-pulse text-sm font-semibold text-muted-foreground">
+        Opening PINGO…
       </div>
     </div>
   );
 }
 
-/** Silent error boundary — if VlyToolbar crashes it renders nothing instead of
- *  crashing the whole app (e.g. hook errors in the browser runtime). */
 class ToolbarErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean }
@@ -44,36 +73,33 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-/** Hard guard so runtime errors never leave the preview as a blank page. */
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean; message: string; stack: string }
+  { hasError: boolean; message: string }
 > {
-  state = { hasError: false, message: "", stack: "" };
+  state = { hasError: false, message: "" };
   static getDerivedStateFromError(error: Error) {
-    return {
-      hasError: true,
-      message: error.message || "Unknown runtime error",
-      stack: error.stack || "",
-    };
+    return { hasError: true, message: error.message || "Unknown runtime error" };
   }
   componentDidCatch(err: Error) {
-    console.error("[Preview] Root crash:", err);
+    console.error("[PINGO] Root crash:", err);
   }
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
-          <div className="max-w-lg text-center">
-            <p className="text-sm font-semibold">Preview runtime error</p>
-            <p className="mt-2 text-xs text-muted-foreground break-words">
+        <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+          <div className="max-w-md text-center">
+            <p className="text-sm font-semibold">PINGO hit a runtime error</p>
+            <p className="mt-2 text-xs break-words text-muted-foreground">
               {this.state.message}
             </p>
-            {this.state.stack && (
-              <pre className="mt-3 text-left text-[10px] leading-4 text-muted-foreground/80 max-h-40 overflow-auto rounded border border-border/60 p-2">
-                {this.state.stack}
-              </pre>
-            )}
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+            >
+              Reload
+            </button>
           </div>
         </div>
       );
@@ -81,10 +107,6 @@ class RootErrorBoundary extends React.Component<
     return this.props.children;
   }
 }
-
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
-
-
 
 function RouteSyncer() {
   const location = useLocation();
@@ -109,6 +131,69 @@ function RouteSyncer() {
   return null;
 }
 
+function AppProviders() {
+  const { session } = useAuth();
+  return (
+    <PresenceProvider userId={session?.user.id ?? null}>
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route
+            path="/auth"
+            element={<AuthPage />}
+          />
+
+          <Route
+            path="/app"
+            element={
+              <RequireAuth>
+                <AppGate>
+                  <AppShell>
+                    <Outlet />
+                  </AppShell>
+                </AppGate>
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Navigate to="/app/chats" replace />} />
+            <Route path="chats" element={<ChatsPage />} />
+            <Route path="updates" element={<UpdatesPage />} />
+            <Route path="communities" element={<CommunitiesPage />} />
+            <Route path="calls" element={<CallsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
+
+          <Route
+            path="/admin/setup"
+            element={
+              <RequireAuth>
+                <AdminSetup />
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <AdminShell>
+                  <Outlet />
+                </AdminShell>
+              </RequireAdmin>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="reports" element={<AdminReports />} />
+            <Route path="access" element={<AdminAccess />} />
+          </Route>
+
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </PresenceProvider>
+  );
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -116,33 +201,13 @@ createRoot(document.getElementById("root")!).render(
       <ToolbarErrorBoundary>
         <VlyToolbar />
       </ToolbarErrorBoundary>
-      <ConvexAuthProvider client={convex}>
+      <AuthProvider>
         <BrowserRouter>
           <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
-              <Route
-                path="/dashboard"
-                element={
-                  <RequireAuth
-                    title="Sign in to see your board"
-                    description="Your crew's pings, tallies, and plans live here."
-                  >
-                    <Dashboard />
-                  </RequireAuth>
-                }
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
+          <AppProviders />
         </BrowserRouter>
         <Toaster />
-      </ConvexAuthProvider>
+      </AuthProvider>
     </RootErrorBoundary>
   </StrictMode>,
 );

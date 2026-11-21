@@ -1,90 +1,82 @@
+import { SetupNotice } from "@/components/SetupNotice";
+import { Wordmark } from "@/components/Wordmark";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Lock } from "lucide-react";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 
-/**
- * Wraps a route that requires a signed-in user.
- *
- * Signed-out visitors used to be bounced straight to `/auth`, which left them
- * on a bare sign-in form with no idea which page they had asked for or why they
- * were moved. The block is now stated on the page they landed on, and sign-in
- * still returns them to it via `returnTo`. Pass `redirectImmediately` for a
- * route where the bounce really is the better experience.
- */
-export function RequireAuth({
-  children,
-  title = "Sign in to see your board",
-  description = "Your crew's pings live behind this door.",
-  redirectImmediately = false,
-}: {
-  children: ReactNode;
-  /** Headline on the blocked screen. */
-  title?: string;
-  /** Says what the visitor gets by signing in. */
-  description?: string;
-  /** Skip the explanation and go straight to `/auth`. */
-  redirectImmediately?: boolean;
-}) {
+export function RequireAuth({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  if (!isSupabaseConfigured) {
+    return <SetupNotice />;
+  }
 
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <div className="flex flex-col items-center gap-4">
+          <Wordmark />
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Connecting securely…</p>
+        </div>
       </main>
     );
   }
 
   if (!isAuthenticated) {
     const returnTo = `${location.pathname}${location.search}`;
-    const signInHref = `/auth?returnTo=${encodeURIComponent(returnTo)}`;
+    return (
+      <Navigate
+        to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
+        replace
+      />
+    );
+  }
 
-    if (redirectImmediately) {
-      return <Navigate to={signInHref} replace />;
-    }
+  return children;
+}
 
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isLoading, isAuthenticated, adminRole } = useAuth();
+  const navigate = useNavigate();
+
+  if (!isSupabaseConfigured) return <SetupNotice />;
+
+  if (isLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/auth?returnTo=%2Fadmin" replace />;
+  }
+
+  if (!adminRole) {
     return (
       <main className="dot-grid flex min-h-screen items-center justify-center bg-background p-6">
-        <Card className="w-full max-w-md border-2 border-border">
-          <CardHeader className="text-center">
-            <div className="flex justify-center">
-              <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-primary/15">
-                <Lock className="size-5 text-primary" />
-              </div>
-            </div>
-            <CardTitle className="font-display text-2xl font-extrabold">
-              {title}
-            </CardTitle>
-            <CardDescription>{description}</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center text-sm text-muted-foreground">
-            Sign in and we'll bring you straight back to this page.
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2">
-            <Button className="w-full" onClick={() => navigate(signInHref)}>
-              Sign in to Pingo
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center">
+          <h1 className="text-2xl font-extrabold">Administration</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            This console is restricted to PINGO staff. Your account does not
+            have an administration role.
+          </p>
+          <div className="mt-6 flex flex-col gap-2">
+            <Button onClick={() => navigate("/app/chats")}>
+              Back to PINGO
             </Button>
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => navigate("/")}
-            >
-              Back to home
+            <Button variant="ghost" onClick={() => navigate("/admin/setup")}>
+              First-admin setup
             </Button>
-          </CardFooter>
-        </Card>
+          </div>
+        </div>
       </main>
     );
   }
