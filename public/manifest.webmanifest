@@ -1,0 +1,17 @@
+{
+  "name": "Pingo — turn maybe into plans",
+  "short_name": "Pingo",
+  "description": "Ping your people, tap in, and actually show up.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6efe1",
+  "theme_color": "#ea5a2b",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
