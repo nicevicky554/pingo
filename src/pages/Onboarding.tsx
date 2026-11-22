@@ -97,12 +97,14 @@ export default function Onboarding() {
         avatarPath = path;
       }
 
+      const testPhone = window.localStorage.getItem("pingo:test_phone");
       const { error: updateError } = await supabase
         .from("profiles")
         .update({
           display_name: cleanName,
           username,
           avatar_path: avatarPath,
+          phone: testPhone ?? profile.phone ?? null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", profile.id);
@@ -113,6 +115,7 @@ export default function Onboarding() {
         throw updateError;
       }
 
+      window.localStorage.removeItem("pingo:test_phone");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save your profile.");

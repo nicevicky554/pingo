@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { CallProvider } from "@/providers/CallProvider";
 import { PresenceProvider } from "@/providers/PresenceProvider";
 import { useAuth } from "@/hooks/use-auth";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
@@ -30,6 +31,7 @@ const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminReports = lazy(() => import("./pages/admin/AdminReports.tsx"));
 const AdminAccess = lazy(() => import("./pages/admin/AdminAccess.tsx"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings.tsx"));
 
 const AppShell = lazy(() =>
   import("@/components/app/AppShell").then((module) => ({
@@ -135,6 +137,7 @@ function AppProviders() {
   const { session } = useAuth();
   return (
     <PresenceProvider userId={session?.user.id ?? null}>
+      <CallProvider>
       <Suspense fallback={<RouteLoading />}>
         <Routes>
           <Route path="/" element={<Landing />} />
@@ -186,11 +189,13 @@ function AppProviders() {
             <Route path="users" element={<AdminUsers />} />
             <Route path="reports" element={<AdminReports />} />
             <Route path="access" element={<AdminAccess />} />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
+      </CallProvider>
     </PresenceProvider>
   );
 }

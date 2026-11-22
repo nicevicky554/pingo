@@ -58,8 +58,19 @@ function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [authMode, setAuthMode] = useState<"test" | "live" | null>(null);
 
   const country = useMemo(() => findCountry(countryIso), [countryIso]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    supabase
+      .rpc("get_auth_mode")
+      .then(({ data, error: modeError }) => {
+        if (!modeError && (data === "test" || data === "live")) setAuthMode(data);
+        else setAuthMode("test");
+      });
+  }, []);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) navigate(redirect, { replace: true });
@@ -72,15 +83,23 @@ function AuthPage() {
   }, [secondsLeft]);
 
   const digits = phone.replace(/\D/g, "");
-  const canSend = digits.length >= 6;
+  const canSend = digits.length >= 6 && authMode !== null;
 
   async function sendCode(event?: React.FormEvent) {
     event?.preventDefault();
-    if (!canSend) return;
+    if (!canSend || !authMode) return;
     setIsLoading(true);
     setError(null);
     const target = `+${country.dial}${digits.replace(/^0+/, "")}`;
     try {
+      if (authMode === "test") {
+        // Test mode is controlled by the platform setting. No SMS is requested.
+        window.localStorage.setItem("pingo:test_phone", target);
+        setFullPhone(target);
+        setStep("code");
+        setSecondsLeft(0);
+        return;
+      }
       const { error: authError } = await supabase.auth.signInWithOtp({
         phone: target,
       });
@@ -101,6 +120,12 @@ function AuthPage() {
     setIsLoading(true);
     setError(null);
     try {
+      if (authMode === "test") {
+        const { error: authError } = await supabase.auth.signInAnonymously();
+        if (authError) throw authError;
+        navigate(redirect, { replace: true });
+        return;
+      }
       const { error: authError } = await supabase.auth.verifyOtp({
         phone: fullPhone,
         token: otp,
@@ -190,9 +215,26 @@ function AuthPage() {
                   Sign in with your phone
                 </h2>
                 <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  Pick your country and enter your number. We'll text a
-                  six-digit code.
+                  {authMode === "test"
+                    ? "Pick your country and enter a number. In test mode no SMS is sent."
+                    : "Pick your country and enter your number. We'll text a six-digit code."}
                 </p>
+
+                {authMode === null && (
+                  <p className="mt-4 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" /> Checking the
+                    sign-in mode…
+                  </p>
+                )}
+
+                {authMode === "test" && (
+                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                    <strong className="font-bold">Test mode is on.</strong> No
+                    SMS is sent. Enter any six digits on the next step to sign
+                    in. An administrator can switch to live SMS in the admin
+                    console.
+                  </div>
+                )}
 
                 <form onSubmit={sendCode} className="mt-6 space-y-4">
                   <div>
@@ -286,15 +328,17 @@ function AuthPage() {
                   <Button
                     type="submit"
                     className="h-11 w-full"
-                    disabled={isLoading || !canSend}
+                    disabled={isLoading || !canSend || authMode === null}
                   >
                     {isLoading ? (
                       <>
-                        <Loader2 className="size-4 animate-spin" /> Sending code…
+                        <Loader2 className="size-4 animate-spin" />{" "}
+                        {authMode === "test" ? "Preparing…" : "Sending code…"}
                       </>
                     ) : (
                       <>
-                        Send my code <ArrowRight className="size-4" />
+                        {authMode === "test" ? "Continue" : "Send my code"}{" "}
+                        <ArrowRight className="size-4" />
                       </>
                     )}
                   </Button>
@@ -323,9 +367,23 @@ function AuthPage() {
                 </span>
                 <h2 className="mt-4 text-2xl font-extrabold">Enter your code</h2>
                 <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  We sent a six-digit code to{" "}
-                  <span className="font-semibold text-foreground">{fullPhone}</span>
-                  .
+                  {authMode === "test" ? (
+                    <>
+                      Test mode is on for{" "}
+                      <span className="font-semibold text-foreground">
+                        {fullPhone}
+                      </span>
+                      . Enter any six digits — nothing is sent.
+                    </>
+                  ) : (
+                    <>
+                      We sent a six-digit code to{" "}
+                      <span className="font-semibold text-foreground">
+                        {fullPhone}
+                      </span>
+                      .
+                    </>
+                  )}
                 </p>
 
                 <form onSubmit={verifyCode} className="mt-6 space-y-4">
@@ -368,7 +426,12 @@ function AuthPage() {
                   </Button>
 
                   <div className="text-center text-sm text-muted-foreground">
-                    {secondsLeft > 0 ? (
+                    {authMode === "test" ? (
+                      <span className="text-xs">
+                        Testing only. Real SMS switches on when an administrator
+                        enables live mode.
+                      </span>
+                    ) : secondsLeft > 0 ? (
                       <span>Resend available in {secondsLeft}s</span>
                     ) : (
                       <button
@@ -394,6 +457,9 @@ function AuthPage() {
 function friendlyAuthError(error: unknown) {
   const message =
     error instanceof Error ? error.message : "Something went wrong. Try again.";
+  if (/anonymous.*(disabled|not enabled|not allowed)|anonymous sign-?ins? are disabled/i.test(message)) {
+    return "Test mode needs Anonymous sign-ins enabled in Supabase → Authentication → Providers. Enable it, then try again.";
+  }
   if (/provider is not enabled|phone.*not enabled/i.test(message)) {
     return "Phone sign-in is not enabled in Supabase yet. Enable the Phone provider and connect an SMS provider, then try again.";
   }

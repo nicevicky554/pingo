@@ -13,6 +13,7 @@ export type Profile = {
   about: string;
   avatar_path: string | null;
   public_avatar_url: string | null;
+  phone?: string | null;
   created_at?: string;
   status?: "active" | "suspended" | "restricted";
   online_visibility?: Visibility;

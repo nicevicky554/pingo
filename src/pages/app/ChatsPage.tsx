@@ -1,5 +1,6 @@
 import { ChatThread } from "@/components/chat/ChatThread";
 import { NewChatDialog } from "@/components/chat/NewChatDialog";
+import { NotificationsMenu } from "@/components/NotificationsMenu";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 
 type MemberWithProfile = ConversationMember & { profile: Profile | null };
 
@@ -49,6 +51,8 @@ export default function ChatsPage() {
   const [hits, setHits] = useState<MessageHit[]>([]);
   const [searching, setSearching] = useState(false);
   const refreshTimer = useRef<number | null>(null);
+  const [searchParams] = useSearchParams();
+  const conversationParam = searchParams.get("c");
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -77,6 +81,10 @@ export default function ChatsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (conversationParam) setActiveId(conversationParam);
+  }, [conversationParam]);
 
   useEffect(() => {
     if (!profile) return;
@@ -170,6 +178,7 @@ export default function ChatsPage() {
               </p>
             </div>
           </div>
+          <NotificationsMenu compact />
           <Button
             size="icon"
             className="rounded-full"

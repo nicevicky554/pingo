@@ -89,11 +89,16 @@ export default function CallsPage() {
               <Video className="size-4" />
             </span>
             <div>
-              <p className="text-sm font-bold">Calling is the next build phase</p>
+              <p className="text-sm font-bold">1:1 calls are live over WebRTC</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                The database already stores call records, participants and
-                events. The WebRTC media layer, TURN configuration and SFU
-                signalling are Phase 6 and are intentionally not faked here.
+                Start a voice or video call from a direct conversation. Signalling
+                travels over private Supabase Realtime topics and every outcome is
+                written to the calls table. Add{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-[0.65em]">
+                  VITE_TURN_URL
+                </code>{" "}
+                (with username and credential) for reliable calls across strict
+                networks. Group calls still require the SFU phase.
               </p>
             </div>
           </div>

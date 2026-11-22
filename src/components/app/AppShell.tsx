@@ -1,3 +1,4 @@
+import { NotificationsMenu } from "@/components/NotificationsMenu";
 import { UserAvatar } from "@/components/UserAvatar";
 import { PingoMark } from "@/components/Wordmark";
 import {
@@ -134,6 +135,7 @@ export function AppShell({
         </nav>
 
         <div className="mt-auto flex flex-col items-center gap-3">
+          <NotificationsMenu />
           <NavLink
             to="/app/settings"
             aria-label="Settings"

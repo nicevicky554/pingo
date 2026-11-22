@@ -30,23 +30,26 @@ export function SetupNotice() {
           <li className="flex gap-3">
             <Database className="mt-0.5 size-4 shrink-0 text-primary" />
             <span>
-              Run{" "}
+              Run the migrations in{" "}
               <code className="rounded bg-muted px-1.5 py-0.5 text-[0.8em]">
-                supabase/migrations/0001_pingo_core.sql
+                supabase/migrations/
               </code>{" "}
-              in the Supabase SQL editor (or via{" "}
+              (0001 then 0002) in the Supabase SQL editor, or via{" "}
               <code className="rounded bg-muted px-1.5 py-0.5 text-[0.8em]">
                 supabase db push
               </code>
-              ). It creates the schema, RLS policies, storage buckets and realtime
-              authorization.
+              . They create the schema, RLS policies, storage buckets, realtime
+              authorization and the admin-controlled test/live sign-in switch.
             </span>
           </li>
           <li className="flex gap-3">
             <ExternalLink className="mt-0.5 size-4 shrink-0 text-primary" />
             <span>
-              Enable the <strong>Phone</strong> auth provider in Supabase and
-              connect an SMS provider to receive one-time codes.
+              For the default test mode, enable <strong>Anonymous sign-ins</strong>{" "}
+              in Supabase → Authentication → Providers. No SMS is sent and any
+              six-digit code signs a tester in. For real codes, also enable the{" "}
+              <strong>Phone</strong> provider and an SMS provider, then switch to
+              live mode in the admin console.
             </span>
           </li>
         </ol>

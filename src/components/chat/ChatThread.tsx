@@ -29,6 +29,7 @@ import type {
   Profile,
 } from "@/lib/types";
 import { usePresence } from "@/providers/PresenceProvider";
+import { useCall } from "@/providers/CallProvider";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import {
@@ -80,6 +81,7 @@ export function ChatThread({
   const [searchTerm, setSearchTerm] = useState("");
 
   const { online } = usePresence();
+  const { startCall } = useCall();
   const { settings } = useAuth();
   const receiptsEnabled = settings?.read_receipts !== false;
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -502,20 +504,42 @@ export function ChatThread({
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Voice call (calling is not enabled yet)"
-          title="Voice calling arrives in Phase 6 of this build"
+          aria-label="Start voice call"
+          title={
+            isGroup
+              ? "Group calling needs the SFU phase"
+              : "Start a WebRTC voice call"
+          }
           className="hidden text-muted-foreground sm:inline-flex"
-          disabled
+          disabled={isGroup}
+          onClick={() =>
+            void startCall({
+              conversationId: conversation.id,
+              kind: "voice",
+              peer: peer ?? { id: "" },
+            })
+          }
         >
           <Phone className="size-5" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Video call (calling is not enabled yet)"
-          title="Video calling arrives in Phase 6 of this build"
+          aria-label="Start video call"
+          title={
+            isGroup
+              ? "Group calling needs the SFU phase"
+              : "Start a WebRTC video call"
+          }
           className="hidden text-muted-foreground sm:inline-flex"
-          disabled
+          disabled={isGroup}
+          onClick={() =>
+            void startCall({
+              conversationId: conversation.id,
+              kind: "video",
+              peer: peer ?? { id: "" },
+            })
+          }
         >
           <Video className="size-5" />
         </Button>

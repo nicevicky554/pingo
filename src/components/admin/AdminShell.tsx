@@ -7,6 +7,7 @@ import {
   BarChart3,
   FileClock,
   Flag,
+  Settings2,
   Shield,
   Users,
 } from "lucide-react";
@@ -18,6 +19,7 @@ const ADMIN_NAV = [
   { to: "/admin/users", label: "Users", icon: Users },
   { to: "/admin/reports", label: "Reports", icon: Flag },
   { to: "/admin/access", label: "Audit & team", icon: FileClock },
+  { to: "/admin/settings", label: "Platform", icon: Settings2 },
 ];
 
 export function AdminShell({ children }: { children: ReactNode }) {
