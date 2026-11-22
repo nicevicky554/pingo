@@ -1,5 +1,5 @@
+import { PingoMark } from "@/components/Wordmark";
 import { SetupNotice } from "@/components/SetupNotice";
-import { Wordmark } from "@/components/Wordmark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,27 +23,23 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { COUNTRIES, findCountry, flagFor } from "@/lib/countries";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { motion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronsUpDown,
   Loader2,
-  Lock,
-  MessageSquareText,
-  Phone,
   ShieldCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 function resolveRedirect(returnTo: string | null) {
   if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) return returnTo;
-  return "/app/chats";
+  return "/";
 }
 
-function AuthPage() {
+export default function AuthPage() {
   const { isLoading: authLoading, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -55,26 +51,27 @@ function AuthPage() {
   const [fullPhone, setFullPhone] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [otp, setOtp] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [authMode, setAuthMode] = useState<"test" | "live" | null>(null);
+  const [attempts, setAttempts] = useState(0);
 
   const country = useMemo(() => findCountry(countryIso), [countryIso]);
-
-  useEffect(() => {
-    if (!isSupabaseConfigured) return;
-    supabase
-      .rpc("get_auth_mode")
-      .then(({ data, error: modeError }) => {
-        if (!modeError && (data === "test" || data === "live")) setAuthMode(data);
-        else setAuthMode("test");
-      });
-  }, []);
+  const digits = phone.replace(/\D/g, "");
+  const canSend = digits.length >= 6 && authMode !== null;
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) navigate(redirect, { replace: true });
   }, [authLoading, isAuthenticated, navigate, redirect]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    supabase.rpc("get_auth_mode").then(({ data, error: modeError }) => {
+      if (!modeError && (data === "test" || data === "live")) setAuthMode(data);
+      else setAuthMode("test");
+    });
+  }, []);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -82,22 +79,18 @@ function AuthPage() {
     return () => window.clearInterval(timer);
   }, [secondsLeft]);
 
-  const digits = phone.replace(/\D/g, "");
-  const canSend = digits.length >= 6 && authMode !== null;
-
   async function sendCode(event?: React.FormEvent) {
     event?.preventDefault();
     if (!canSend || !authMode) return;
-    setIsLoading(true);
+    setLoading(true);
     setError(null);
     const target = `+${country.dial}${digits.replace(/^0+/, "")}`;
     try {
       if (authMode === "test") {
-        // Test mode is controlled by the platform setting. No SMS is requested.
         window.localStorage.setItem("pingo:test_phone", target);
         setFullPhone(target);
         setStep("code");
-        setSecondsLeft(0);
+        setSecondsLeft(30);
         return;
       }
       const { error: authError } = await supabase.auth.signInWithOtp({
@@ -110,14 +103,14 @@ function AuthPage() {
     } catch (err) {
       setError(friendlyAuthError(err));
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }
 
   async function verifyCode(event: React.FormEvent) {
     event.preventDefault();
-    if (otp.length !== 6) return;
-    setIsLoading(true);
+    if (otp.length !== 6 || attempts >= 5) return;
+    setLoading(true);
     setError(null);
     try {
       if (authMode === "test") {
@@ -134,322 +127,257 @@ function AuthPage() {
       if (authError) throw authError;
       navigate(redirect, { replace: true });
     } catch (err) {
+      setAttempts((count) => count + 1);
       setError(friendlyAuthError(err));
       setOtp("");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }
 
   if (!isSupabaseConfigured) return <SetupNotice />;
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <header className="border-b border-border bg-background/85 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link to="/" aria-label="PINGO home">
-            <Wordmark />
-          </Link>
-          <Button asChild variant="ghost" size="sm" className="gap-1.5">
-            <Link to="/">
-              <ArrowLeft className="size-4" /> Back to home
-            </Link>
-          </Button>
+    <div className="flex min-h-dvh flex-col bg-background">
+      <main className="mx-auto flex w-full max-w-[420px] flex-1 flex-col justify-center px-6 py-10">
+        <div className="flex items-center gap-2.5">
+          <PingoMark className="size-9" />
+          <span className="text-[1.05rem] font-bold tracking-[0.08em] text-foreground">
+            PINGO
+          </span>
         </div>
-      </header>
 
-      <div className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-12 px-4 py-10 sm:px-6 lg:grid-cols-[1fr_0.9fr] lg:py-16">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45 }}
-          className="hidden lg:block"
-        >
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">
-            Welcome to PINGO
-          </p>
-          <h1 className="mt-4 max-w-lg text-5xl leading-[1.03] font-extrabold">
-            Your number is
-            <span className="font-serif-display block text-primary italic">
-              your account.
-            </span>
-          </h1>
-          <p className="mt-5 max-w-md text-lg leading-8 text-muted-foreground">
-            No password to invent, reuse or leak. Verify your phone once and
-            every PINGO device signs into the same person.
-          </p>
+        {step === "phone" ? (
+          <form onSubmit={sendCode} className="mt-10">
+            <h1 className="text-[1.7rem] leading-tight font-semibold tracking-[-0.03em]">
+              Welcome to PINGO
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Enter your phone number to continue. We use it to identify your
+              account across devices.
+            </p>
 
-          <div className="mt-10 max-w-md space-y-3">
-            {[
-              { icon: MessageSquareText, text: "One account for chats and calls" },
-              { icon: ShieldCheck, text: "Private photos stay private by default" },
-              { icon: Lock, text: "Row Level Security on every table" },
-            ].map(({ icon: Icon, text }) => (
-              <div
-                key={text}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-              >
-                <span className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <Icon className="size-4" />
-                </span>
-                <span className="text-sm font-semibold">{text}</span>
-                <Check className="ml-auto size-4 text-primary" />
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, delay: 0.08 }}
-          className="mx-auto w-full max-w-md"
-        >
-          <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-            {step === "phone" ? (
-              <>
-                <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Phone className="size-5" />
-                </span>
-                <h2 className="mt-4 text-2xl font-extrabold">
-                  Sign in with your phone
-                </h2>
-                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  {authMode === "test"
-                    ? "Pick your country and enter a number. In test mode no SMS is sent."
-                    : "Pick your country and enter your number. We'll text a six-digit code."}
-                </p>
-
-                {authMode === null && (
-                  <p className="mt-4 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin" /> Checking the
-                    sign-in mode…
-                  </p>
-                )}
-
-                {authMode === "test" && (
-                  <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-200">
-                    <strong className="font-bold">Test mode is on.</strong> No
-                    SMS is sent. Enter any six digits on the next step to sign
-                    in. An administrator can switch to live SMS in the admin
-                    console.
-                  </div>
-                )}
-
-                <form onSubmit={sendCode} className="mt-6 space-y-4">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-[0.1em] text-muted-foreground">
-                      Country
-                    </label>
-                    <Popover open={countryOpen} onOpenChange={setCountryOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={countryOpen}
-                          className="h-11 w-full justify-between font-medium"
-                        >
-                          <span className="flex items-center gap-2 truncate">
-                            <span className="text-base">{flagFor(country.iso)}</span>
-                            <span className="truncate">{country.name}</span>
-                            <span className="text-muted-foreground">
-                              +{country.dial}
-                            </span>
-                          </span>
-                          <ChevronsUpDown className="size-4 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder="Search country or code…" />
-                          <CommandList>
-                            <CommandEmpty>No country found.</CommandEmpty>
-                            <CommandGroup>
-                              {COUNTRIES.map((item) => (
-                                <CommandItem
-                                  key={item.iso}
-                                  value={`${item.name} ${item.iso} ${item.dial}`}
-                                  onSelect={() => {
-                                    setCountryIso(item.iso);
-                                    setCountryOpen(false);
-                                  }}
-                                >
-                                  <span className="mr-2">{flagFor(item.iso)}</span>
-                                  <span className="flex-1 truncate">{item.name}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    +{item.dial}
-                                  </span>
-                                  {item.iso === countryIso && (
-                                    <Check className="ml-2 size-4 text-primary" />
-                                  )}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="phone"
-                      className="mb-1.5 block text-xs font-bold uppercase tracking-[0.1em] text-muted-foreground"
-                    >
-                      Phone number
-                    </label>
-                    <div className="flex items-center gap-2 rounded-lg border border-input bg-background px-3 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20">
-                      <span className="text-sm font-semibold text-muted-foreground">
-                        +{country.dial}
-                      </span>
-                      <Input
-                        id="phone"
-                        name="phone"
-                        type="tel"
-                        inputMode="tel"
-                        autoComplete="tel-national"
-                        placeholder="801 234 5678"
-                        value={phone}
-                        onChange={(event) => setPhone(event.target.value)}
-                        className="h-11 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-                        disabled={isLoading}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {error && (
-                    <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
-                      {error}
-                    </p>
-                  )}
-
-                  <Button
-                    type="submit"
-                    className="h-11 w-full"
-                    disabled={isLoading || !canSend || authMode === null}
+            <div className="mt-9">
+              <label className="text-xs font-medium text-muted-foreground">
+                Country
+              </label>
+              <Popover open={countryOpen} onOpenChange={setCountryOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    role="combobox"
+                    aria-expanded={countryOpen}
+                    className="mt-1.5 flex w-full items-center gap-2 border-b border-input pb-2.5 text-left transition-colors hover:border-muted-foreground"
                   >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="size-4 animate-spin" />{" "}
-                        {authMode === "test" ? "Preparing…" : "Sending code…"}
-                      </>
-                    ) : (
-                      <>
-                        {authMode === "test" ? "Continue" : "Send my code"}{" "}
-                        <ArrowRight className="size-4" />
-                      </>
-                    )}
-                  </Button>
-                </form>
+                    <span className="text-lg leading-none">
+                      {flagFor(country.iso)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {country.name}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      +{country.dial}
+                    </span>
+                    <ChevronsUpDown className="size-4 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-[--radix-popover-trigger-width] p-0"
+                  align="start"
+                >
+                  <Command>
+                    <CommandInput placeholder="Search country or code…" />
+                    <CommandList>
+                      <CommandEmpty>No country found.</CommandEmpty>
+                      <CommandGroup>
+                        {COUNTRIES.map((item) => (
+                          <CommandItem
+                            key={item.iso}
+                            value={`${item.name} ${item.iso} ${item.dial}`}
+                            onSelect={() => {
+                              setCountryIso(item.iso);
+                              setCountryOpen(false);
+                            }}
+                          >
+                            <span className="mr-2">{flagFor(item.iso)}</span>
+                            <span className="flex-1 truncate">{item.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              +{item.dial}
+                            </span>
+                            {item.iso === countryIso && (
+                              <Check className="ml-2 size-4 text-primary" />
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
 
-                <p className="mt-4 text-center text-xs leading-5 text-muted-foreground">
-                  By continuing you agree to keep PINGO conversations respectful.
-                  Messages are stored securely in your Supabase project.
-                </p>
-              </>
-            ) : (
-              <>
+            <div className="mt-5">
+              <label
+                htmlFor="phone"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Phone number
+              </label>
+              <div className="mt-1.5 flex items-end gap-2 border-b border-input pb-2 transition-colors focus-within:border-primary">
+                <span className="pb-0.5 text-sm font-medium text-muted-foreground">
+                  +{country.dial}
+                </span>
+                <Input
+                  id="phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel-national"
+                  placeholder="801 234 5678"
+                  value={phone}
+                  onChange={(event) =>
+                    setPhone(event.target.value.replace(/[^\d\s-]/g, ""))
+                  }
+                  disabled={loading}
+                  className="h-8 flex-1 border-0 bg-transparent px-0 text-base shadow-none focus-visible:ring-0"
+                />
+              </div>
+              <p className="mt-2 text-[0.7rem] text-muted-foreground">
+                Include the number without the country code.
+              </p>
+            </div>
+
+            {authMode === "test" && (
+              <p className="mt-5 rounded-md bg-amber-500/10 px-3 py-2 text-[0.72rem] leading-5 text-amber-800 dark:text-amber-200">
+                Test mode is active. No SMS is sent — any six digits will sign
+                you in.
+              </p>
+            )}
+
+            {error && (
+              <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              className="mt-7 h-11 w-full font-semibold"
+              disabled={!canSend || loading}
+            >
+              {loading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <>
+                  Continue <ArrowRight className="size-4" />
+                </>
+              )}
+            </Button>
+
+            <p className="mt-6 text-center text-[0.68rem] leading-5 text-muted-foreground">
+              By continuing you agree to use PINGO respectfully. Your number is
+              stored with your Supabase account.
+            </p>
+          </form>
+        ) : (
+          <form onSubmit={verifyCode} className="mt-6">
+            <button
+              type="button"
+              onClick={() => {
+                setStep("phone");
+                setOtp("");
+                setError(null);
+                setAttempts(0);
+              }}
+              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" /> Change number
+            </button>
+
+            <h1 className="mt-6 text-[1.6rem] leading-tight font-semibold tracking-[-0.03em]">
+              Enter verification code
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {authMode === "test" ? (
+                <>
+                  Test mode is active for{" "}
+                  <span className="font-medium text-foreground">{fullPhone}</span>
+                  . Enter any six digits.
+                </>
+              ) : (
+                <>
+                  We sent a six-digit code to{" "}
+                  <span className="font-medium text-foreground">{fullPhone}</span>
+                  .
+                </>
+              )}
+            </p>
+
+            <div className="mt-7">
+              <InputOTP
+                value={otp}
+                onChange={setOtp}
+                maxLength={6}
+                disabled={loading || attempts >= 5}
+                autoFocus
+              >
+                <InputOTPGroup className="w-full justify-between gap-2">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <InputOTPSlot
+                      key={index}
+                      index={index}
+                      className="h-12 w-full rounded-md border border-input bg-card text-base first:rounded-md last:rounded-md"
+                    />
+                  ))}
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+
+            {error && (
+              <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                {error}
+              </p>
+            )}
+
+            {attempts >= 5 && (
+              <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                Too many attempts. Change the number or wait a minute before
+                trying again.
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              className="mt-6 h-11 w-full font-semibold"
+              disabled={otp.length !== 6 || loading || attempts >= 5}
+            >
+              {loading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <>
+                  <ShieldCheck className="size-4" /> Verify
+                </>
+              )}
+            </Button>
+
+            <div className="mt-5 text-center text-xs text-muted-foreground">
+              {authMode === "test" ? (
+                <span>No message is sent while test mode is on.</span>
+              ) : secondsLeft > 0 ? (
+                <span>Resend available in {secondsLeft}s</span>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    setStep("phone");
-                    setOtp("");
-                    setError(null);
-                  }}
-                  className="mb-4 inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() => void sendCode()}
+                  disabled={loading}
                 >
-                  <ArrowLeft className="size-3.5" /> Change number
+                  Resend code
                 </button>
-                <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <ShieldCheck className="size-5" />
-                </span>
-                <h2 className="mt-4 text-2xl font-extrabold">Enter your code</h2>
-                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  {authMode === "test" ? (
-                    <>
-                      Test mode is on for{" "}
-                      <span className="font-semibold text-foreground">
-                        {fullPhone}
-                      </span>
-                      . Enter any six digits — nothing is sent.
-                    </>
-                  ) : (
-                    <>
-                      We sent a six-digit code to{" "}
-                      <span className="font-semibold text-foreground">
-                        {fullPhone}
-                      </span>
-                      .
-                    </>
-                  )}
-                </p>
-
-                <form onSubmit={verifyCode} className="mt-6 space-y-4">
-                  <div className="flex justify-center">
-                    <InputOTP
-                      value={otp}
-                      onChange={setOtp}
-                      maxLength={6}
-                      disabled={isLoading}
-                      autoFocus
-                    >
-                      <InputOTPGroup>
-                        {Array.from({ length: 6 }).map((_, index) => (
-                          <InputOTPSlot key={index} index={index} />
-                        ))}
-                      </InputOTPGroup>
-                    </InputOTP>
-                  </div>
-
-                  {error && (
-                    <p className="rounded-lg bg-destructive/10 px-3 py-2 text-center text-sm font-medium text-destructive">
-                      {error}
-                    </p>
-                  )}
-
-                  <Button
-                    type="submit"
-                    className="h-11 w-full"
-                    disabled={isLoading || otp.length !== 6}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="size-4 animate-spin" /> Checking…
-                      </>
-                    ) : (
-                      <>
-                        Verify and continue <ArrowRight className="size-4" />
-                      </>
-                    )}
-                  </Button>
-
-                  <div className="text-center text-sm text-muted-foreground">
-                    {authMode === "test" ? (
-                      <span className="text-xs">
-                        Testing only. Real SMS switches on when an administrator
-                        enables live mode.
-                      </span>
-                    ) : secondsLeft > 0 ? (
-                      <span>Resend available in {secondsLeft}s</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="font-semibold text-primary hover:underline"
-                        onClick={() => void sendCode()}
-                        disabled={isLoading}
-                      >
-                        Send a new code
-                      </button>
-                    )}
-                  </div>
-                </form>
-              </>
-            )}
-          </div>
-        </motion.div>
-      </div>
+              )}
+            </div>
+          </form>
+        )}
+      </main>
     </div>
   );
 }
@@ -457,11 +385,15 @@ function AuthPage() {
 function friendlyAuthError(error: unknown) {
   const message =
     error instanceof Error ? error.message : "Something went wrong. Try again.";
-  if (/anonymous.*(disabled|not enabled|not allowed)|anonymous sign-?ins? are disabled/i.test(message)) {
-    return "Test mode needs Anonymous sign-ins enabled in Supabase → Authentication → Providers. Enable it, then try again.";
+  if (
+    /anonymous.*(disabled|not enabled|not allowed)|anonymous sign-?ins? are disabled/i.test(
+      message,
+    )
+  ) {
+    return "Test mode needs Anonymous sign-ins enabled in Supabase → Authentication → Providers.";
   }
   if (/provider is not enabled|phone.*not enabled/i.test(message)) {
-    return "Phone sign-in is not enabled in Supabase yet. Enable the Phone provider and connect an SMS provider, then try again.";
+    return "Phone sign-in is not enabled in Supabase yet. Enable the Phone provider and an SMS provider.";
   }
   if (/invalid.*phone|phone.*invalid/i.test(message)) {
     return "That phone number doesn't look right. Check the country code and digits.";
@@ -474,5 +406,3 @@ function friendlyAuthError(error: unknown) {
   }
   return message;
 }
-
-export default AuthPage;

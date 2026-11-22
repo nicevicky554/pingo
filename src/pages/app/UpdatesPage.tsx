@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { startDirectConversation } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
+import { watchChannel } from "@/lib/realtime";
 import type { Channel, Profile, StatusUpdate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -100,6 +101,7 @@ function StatusVisual({ status }: { status: StatusUpdate }) {
 
 export default function UpdatesPage() {
   const { profile } = useAuth();
+  const profileId = profile?.id;
   const [statuses, setStatuses] = useState<StatusUpdate[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [viewed, setViewed] = useState<Set<string>>(new Set());
@@ -114,7 +116,7 @@ export default function UpdatesPage() {
   const [createChannelOpen, setCreateChannelOpen] = useState(false);
 
   const load = useCallback(async () => {
-    if (!profile) return;
+    if (!profileId) return;
     setLoading(true);
     const { data: rows } = await supabase
       .from("status_updates")
@@ -138,7 +140,7 @@ export default function UpdatesPage() {
     const { data: views } = await supabase
       .from("status_views")
       .select("status_id,viewer_id")
-      .eq("viewer_id", profile.id);
+      .eq("viewer_id", profileId);
     setViewed(new Set((views ?? []).map((row) => row.status_id)));
 
     const { data: publicChannels } = await supabase
@@ -152,20 +154,19 @@ export default function UpdatesPage() {
     const { data: memberships } = await supabase
       .from("channel_members")
       .select("channel_id")
-      .eq("user_id", profile.id);
+      .eq("user_id", profileId);
     setFollowed(new Set((memberships ?? []).map((row) => row.channel_id)));
 
     setLoading(false);
-  }, [profile]);
+  }, [profileId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    if (!profile) return;
-    const channel = supabase
-      .channel("status-watch")
+    if (!profileId) return;
+    const channel = watchChannel("status-watch")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "status_updates" },
@@ -175,7 +176,7 @@ export default function UpdatesPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [load, profile]);
+  }, [load, profileId]);
 
   const mine = useMemo(
     () => statuses.filter((status) => status.user_id === profile?.id),
@@ -243,12 +244,9 @@ export default function UpdatesPage() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-      <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-card/95 px-4 backdrop-blur sm:px-6">
-        <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Radio className="size-5" />
-        </span>
+      <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
         <div>
-          <h1 className="text-base font-extrabold">Updates</h1>
+          <h1 className="text-[1.05rem] font-semibold tracking-[-0.01em]">Updates</h1>
           <p className="text-[0.68rem] text-muted-foreground">
             Statuses and channels, live for 24 hours
           </p>

@@ -242,10 +242,10 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-card/95 px-4 backdrop-blur sm:px-6">
-        <UserAvatar profile={profile} size="sm" showPresence />
+      <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
+        <UserAvatar profile={profile} size="md" showPresence />
         <div className="min-w-0">
-          <h1 className="truncate text-base font-extrabold">Settings</h1>
+          <h1 className="truncate text-[1.05rem] font-semibold tracking-[-0.01em]">Settings</h1>
           <p className="truncate text-[0.68rem] text-muted-foreground">
             {profile.display_name} · @{profile.username}
           </p>

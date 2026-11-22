@@ -32,7 +32,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     const returnTo = `${location.pathname}${location.search}`;
     return (
       <Navigate
-        to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
+        to={`/?returnTo=${encodeURIComponent(returnTo)}`}
         replace
       />
     );
@@ -56,7 +56,7 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/auth?returnTo=%2Fadmin" replace />;
+    return <Navigate to="/?returnTo=%2Fadmin" replace />;
   }
 
   if (!adminRole) {

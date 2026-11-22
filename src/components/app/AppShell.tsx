@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import {
   LogOut,
-  MessageCircle,
+  MessageSquare,
   Phone,
   Radio,
   Settings,
@@ -25,7 +25,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router";
 
 const NAV = [
-  { to: "/app/chats", label: "Chats", icon: MessageCircle },
+  { to: "/app/chats", label: "Chats", icon: MessageSquare },
   { to: "/app/updates", label: "Updates", icon: Radio },
   { to: "/app/communities", label: "Communities", icon: UsersRound },
   { to: "/app/calls", label: "Calls", icon: Phone },
@@ -63,7 +63,7 @@ function ProfileMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="right" className="w-60">
         <DropdownMenuLabel>
-          <span className="block truncate font-semibold">
+          <span className="block truncate text-sm font-semibold">
             {profile?.display_name || "Your profile"}
           </span>
           <span className="block truncate text-xs font-normal text-muted-foreground">
@@ -102,16 +102,16 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
-      <aside className="hidden w-[76px] shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar py-4 md:flex">
+      <aside className="hidden w-[68px] shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar py-3 md:flex">
         <NavLink
           to="/app/chats"
-          aria-label="PINGO home"
-          className="mb-4 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="PINGO"
+          className="mb-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <PingoMark className="size-10" />
+          <PingoMark className="size-9" />
         </NavLink>
 
-        <nav className="flex flex-col items-center gap-1" aria-label="Primary">
+        <nav className="flex w-full flex-col items-center gap-0.5 px-1.5" aria-label="Primary">
           {NAV.map((item) => {
             const Icon = item.icon;
             return (
@@ -120,35 +120,35 @@ export function AppShell({
                 to={item.to}
                 className={({ isActive }) =>
                   cn(
-                    "group relative flex w-14 flex-col items-center gap-1 rounded-xl px-1 py-2.5 text-[0.62rem] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "relative flex w-full flex-col items-center gap-1 rounded-md py-2 text-[0.58rem] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isActive
-                      ? "bg-sidebar-accent text-primary"
-                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                      ? "bg-accent text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
                   )
                 }
               >
-                <Icon className="size-[23px]" strokeWidth={2} aria-hidden="true" />
+                <Icon className="size-[23px]" strokeWidth={1.9} aria-hidden="true" />
                 <span>{item.label}</span>
               </NavLink>
             );
           })}
         </nav>
 
-        <div className="mt-auto flex flex-col items-center gap-3">
+        <div className="mt-auto flex flex-col items-center gap-1.5">
           <NotificationsMenu />
           <NavLink
             to="/app/settings"
             aria-label="Settings"
             className={({ isActive }) =>
               cn(
-                "flex size-10 items-center justify-center rounded-xl transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "flex size-10 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 isActive
-                  ? "bg-sidebar-accent text-primary"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+                  ? "bg-accent text-primary"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
               )
             }
           >
-            <Settings className="size-[22px]" aria-hidden="true" />
+            <Settings className="size-[21px]" aria-hidden="true" />
           </NavLink>
           <ProfileMenu />
         </div>
@@ -156,9 +156,9 @@ export function AppShell({
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!online && (
-          <div className="flex items-center justify-center gap-2 bg-amber-500/15 px-4 py-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+          <div className="flex items-center justify-center gap-2 bg-amber-500/15 px-4 py-1.5 text-[0.7rem] font-medium text-amber-800 dark:text-amber-200">
             <WifiOff className="size-3.5" />
-            You are offline. Messages will send when the connection returns.
+            No connection. Messages will send when you're back online.
           </div>
         )}
         <div className={cn("flex min-h-0 flex-1 flex-col pb-[57px] md:pb-0", className)}>
@@ -167,7 +167,7 @@ export function AppShell({
       </div>
 
       <nav
-        className="safe-bottom fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-border bg-card/95 backdrop-blur md:hidden"
+        className="safe-bottom fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-border bg-card md:hidden"
         aria-label="Primary"
       >
         {NAV.map((item) => {
@@ -178,12 +178,12 @@ export function AppShell({
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "flex min-w-0 flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[0.62rem] font-semibold transition-colors",
+                  "flex min-w-0 flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[0.6rem] font-medium transition-colors",
                   isActive ? "text-primary" : "text-muted-foreground",
                 )
               }
             >
-              <Icon className="size-[23px]" aria-hidden="true" />
+              <Icon className="size-[22px]" strokeWidth={1.9} aria-hidden="true" />
               <span>{item.label}</span>
             </NavLink>
           );
@@ -192,12 +192,12 @@ export function AppShell({
           to="/app/settings"
           className={({ isActive }) =>
             cn(
-              "flex min-w-0 flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[0.62rem] font-semibold transition-colors",
+              "flex min-w-0 flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[0.6rem] font-medium transition-colors",
               isActive ? "text-primary" : "text-muted-foreground",
             )
           }
         >
-          <Settings className="size-[23px]" aria-hidden="true" />
+          <Settings className="size-[22px]" strokeWidth={1.9} aria-hidden="true" />
           <span>Settings</span>
         </NavLink>
       </nav>

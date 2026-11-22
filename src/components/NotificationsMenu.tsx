@@ -7,132 +7,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/lib/supabase";
+import { useNotifications } from "@/providers/NotificationsProvider";
 import { cn } from "@/lib/utils";
 import {
   Bell,
   BellRing,
   CheckCheck,
+  Loader2,
   MessageCircle,
   Phone,
   Radio,
-  Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-type NotificationRow = {
-  id: string;
-  kind: string;
-  title: string;
-  body: string | null;
-  data: {
-    conversation_id?: string;
-    message_id?: string;
-    call_id?: string;
-  } | null;
-  read_at: string | null;
-  created_at: string;
-};
-
 export function NotificationsMenu({ compact = false }: { compact?: boolean }) {
-  const { profile } = useAuth();
+  const {
+    items,
+    unread,
+    loading,
+    permission,
+    requestPermission,
+    markRead,
+    markAllRead,
+  } = useNotifications();
   const navigate = useNavigate();
-  const [items, setItems] = useState<NotificationRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
-    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
-  );
-
-  const load = useCallback(async () => {
-    if (!profile) return;
-    const { data } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", profile.id)
-      .order("created_at", { ascending: false })
-      .limit(30);
-    setItems((data ?? []) as NotificationRow[]);
-    setLoading(false);
-  }, [profile]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    if (!profile) return;
-    const channel = supabase
-      .channel(`notifications:${profile.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${profile.id}`,
-        },
-        (payload) => {
-          const incoming = payload.new as NotificationRow;
-          setItems((current) =>
-            current.some((item) => item.id === incoming.id)
-              ? current
-              : [incoming, ...current].slice(0, 30),
-          );
-          if (
-            typeof Notification !== "undefined" &&
-            Notification.permission === "granted" &&
-            document.visibilityState !== "visible"
-          ) {
-            new Notification(incoming.title, {
-              body: incoming.body ?? undefined,
-              tag: incoming.id,
-            });
-          }
-        },
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [profile]);
-
-  async function markRead(row: NotificationRow) {
-    if (!row.read_at) {
-      await supabase
-        .from("notifications")
-        .update({ read_at: new Date().toISOString() })
-        .eq("id", row.id);
-      setItems((current) =>
-        current.map((item) =>
-          item.id === row.id
-            ? { ...item, read_at: new Date().toISOString() }
-            : item,
-        ),
-      );
-    }
-    if (row.data?.conversation_id && row.kind === "message") {
-      navigate(`/app/chats?c=${row.data.conversation_id}`);
-    } else if (row.kind === "call") {
-      navigate("/app/calls");
-    }
-  }
-
-  async function markAllRead() {
-    if (!profile) return;
-    const now = new Date().toISOString();
-    await supabase
-      .from("notifications")
-      .update({ read_at: now })
-      .eq("user_id", profile.id)
-      .is("read_at", null);
-    setItems((current) =>
-      current.map((item) => ({ ...item, read_at: item.read_at ?? now })),
-    );
-  }
-
-  const unread = items.filter((item) => !item.read_at).length;
 
   return (
     <DropdownMenu>
@@ -141,10 +39,10 @@ export function NotificationsMenu({ compact = false }: { compact?: boolean }) {
           type="button"
           aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
           className={cn(
-            "relative flex items-center justify-center rounded-xl transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "relative flex items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
             compact
-              ? "size-9 text-muted-foreground hover:bg-accent hover:text-foreground"
-              : "size-10 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+              ? "size-9 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              : "size-10 text-muted-foreground hover:bg-secondary hover:text-foreground",
           )}
         >
           {unread > 0 ? (
@@ -153,7 +51,7 @@ export function NotificationsMenu({ compact = false }: { compact?: boolean }) {
             <Bell className="size-[22px]" />
           )}
           {unread > 0 && (
-            <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.55rem] leading-4 font-bold text-primary-foreground">
+            <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-[var(--online)] px-1 text-[0.55rem] leading-4 font-bold text-white">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
@@ -161,7 +59,9 @@ export function NotificationsMenu({ compact = false }: { compact?: boolean }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
         <div className="flex items-center justify-between px-2 py-1.5">
-          <DropdownMenuLabel className="p-0 text-sm">Notifications</DropdownMenuLabel>
+          <DropdownMenuLabel className="p-0 text-sm">
+            Notifications
+          </DropdownMenuLabel>
           {unread > 0 && (
             <Button
               variant="ghost"
@@ -196,9 +96,16 @@ export function NotificationsMenu({ compact = false }: { compact?: boolean }) {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => void markRead(item)}
+                  onClick={() => {
+                    void markRead(item);
+                    if (item.data?.conversation_id && item.kind === "message") {
+                      navigate(`/app/chats?c=${item.data.conversation_id}`);
+                    } else if (item.kind === "call") {
+                      navigate("/app/calls");
+                    }
+                  }}
                   className={cn(
-                    "flex w-full items-start gap-2.5 border-b border-border/60 px-3 py-2.5 text-left transition-colors hover:bg-accent/60",
+                    "flex w-full items-start gap-2.5 border-b border-border/60 px-3 py-2.5 text-left transition-colors hover:bg-secondary",
                     !item.read_at && "bg-primary/[0.04]",
                   )}
                 >
@@ -233,12 +140,9 @@ export function NotificationsMenu({ compact = false }: { compact?: boolean }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={permission === "granted" || permission === "unsupported"}
-          onSelect={async (event) => {
+          onSelect={(event) => {
             event.preventDefault();
-            if (typeof Notification === "undefined") return;
-            const result = await Notification.requestPermission();
-            setPermission(result);
-            if (result === "granted") void load();
+            void requestPermission();
           }}
         >
           <Bell className="size-4" />

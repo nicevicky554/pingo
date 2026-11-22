@@ -4,6 +4,7 @@ import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { CallProvider } from "@/providers/CallProvider";
+import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { PresenceProvider } from "@/providers/PresenceProvider";
 import { useAuth } from "@/hooks/use-auth";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
@@ -18,7 +19,7 @@ import {
 } from "react-router";
 import "./index.css";
 
-const Landing = lazy(() => import("./pages/Landing.tsx"));
+const Home = lazy(() => import("./pages/Home.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const ChatsPage = lazy(() => import("./pages/app/ChatsPage.tsx"));
 const UpdatesPage = lazy(() => import("./pages/app/UpdatesPage.tsx"));
@@ -136,15 +137,13 @@ function RouteSyncer() {
 function AppProviders() {
   const { session } = useAuth();
   return (
+    <NotificationsProvider>
     <PresenceProvider userId={session?.user.id ?? null}>
       <CallProvider>
       <Suspense fallback={<RouteLoading />}>
         <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route
-            path="/auth"
-            element={<AuthPage />}
-          />
+          <Route path="/" element={<Home />} />
+          <Route path="/auth" element={<AuthPage />} />
 
           <Route
             path="/app"
@@ -197,6 +196,7 @@ function AppProviders() {
       </Suspense>
       </CallProvider>
     </PresenceProvider>
+    </NotificationsProvider>
   );
 }
 

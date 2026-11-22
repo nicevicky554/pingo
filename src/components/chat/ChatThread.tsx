@@ -22,6 +22,7 @@ import {
 } from "@/lib/chat";
 import { dayLabel, lastSeenLabel, timeOf } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
+import { freshPrivateChannel } from "@/lib/realtime";
 import type {
   ConversationMember,
   ConversationSummary,
@@ -77,6 +78,9 @@ export function ChatThread({
   const [error, setError] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [typing, setTyping] = useState<Record<string, number>>({});
+  const [activities, setActivities] = useState<
+    Record<string, { label: string; expiry: number }>
+  >({});
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -163,8 +167,8 @@ export function ChatThread({
 
   // Realtime: messages, receipts, reactions and typing over one private channel.
   useEffect(() => {
-    const channel = supabase.channel(`conversation:${conversation.id}`, {
-      config: { private: true },
+    const channel = freshPrivateChannel(`conversation:${conversation.id}`, {
+      private: true,
     });
 
     channel
@@ -242,6 +246,22 @@ export function ChatThread({
           return next;
         });
       })
+      .on("broadcast", { event: "activity" }, ({ payload }) => {
+        const data = payload as { user_id?: string; activity?: string };
+        if (!data?.user_id || data.user_id === currentUserId) return;
+        setActivities((current) => {
+          const next = { ...current };
+          if (data.activity) {
+            next[data.user_id!] = {
+              label: data.activity,
+              expiry: Date.now() + 5000,
+            };
+          } else {
+            delete next[data.user_id!];
+          }
+          return next;
+        });
+      })
       .subscribe();
 
     channelRef.current = channel;
@@ -249,7 +269,10 @@ export function ChatThread({
       void supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [conversation.id, currentUserId, refreshReceipts, receiptsEnabled]);
+    // `receiptsEnabled` is read through a ref-like closure; re-subscribing for a
+    // preference change is unnecessary and risks a topic reuse race.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id, currentUserId, refreshReceipts]);
 
   // Expire stale typing indicators rather than showing them forever.
   useEffect(() => {
@@ -263,9 +286,29 @@ export function ChatThread({
         }
         return changed ? next : current;
       });
+      setActivities((current) => {
+        const next: typeof current = {};
+        let changed = false;
+        for (const [id, value] of Object.entries(current)) {
+          if (value.expiry > Date.now()) next[id] = value;
+          else changed = true;
+        }
+        return changed ? next : current;
+      });
     }, 1000);
     return () => window.clearInterval(interval);
   }, []);
+
+  const notifyActivity = useCallback(
+    (activity: "" | "recording" | "uploading") => {
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "activity",
+        payload: { user_id: currentUserId, activity },
+      });
+    },
+    [currentUserId],
+  );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -282,14 +325,20 @@ export function ChatThread({
     });
   }, [currentUserId, currentProfile.display_name]);
 
-  async function handleSend(outgoing: OutgoingMessage) {
+  async function handleSend(
+    outgoing: OutgoingMessage,
+    onProgress: (percent: number) => void,
+  ) {
     let attachmentPath: string | null = null;
     if (outgoing.file) {
+      notifyActivity("uploading");
       attachmentPath = await uploadChatAttachment(
         conversation.id,
         outgoing.file,
         outgoing.fileName ?? "attachment",
+        onProgress,
       );
+      notifyActivity("");
     }
 
     const sent = await sendMessage({
@@ -302,6 +351,7 @@ export function ChatThread({
       attachmentSize: outgoing.file?.size ?? null,
       attachmentMime: outgoing.file?.type ?? null,
       durationSeconds: outgoing.durationSeconds ?? null,
+      waveform: outgoing.waveform ?? null,
       replyToId: replyTo?.id ?? null,
       disappearSeconds: conversation.disappear_seconds,
     });
@@ -433,6 +483,13 @@ export function ChatThread({
   }
 
   const typingNames = Object.keys(typing).map((id) => nameFor(id));
+  const activityEntries = Object.entries(activities);
+  const primaryActivity = activityEntries[0];
+  const activityLabel = primaryActivity
+    ? primaryActivity[1].label === "recording"
+      ? "Recording audio…"
+      : "Uploading a file…"
+    : null;
   const peerOnline =
     !isGroup &&
     peer?.online_visibility === "everyone" &&
@@ -457,7 +514,7 @@ export function ChatThread({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-background">
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:px-4">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:h-16 sm:px-4">
         <Button
           variant="ghost"
           size="icon"
@@ -468,13 +525,15 @@ export function ChatThread({
           <ArrowLeft className="size-5" />
         </Button>
 
-        <UserAvatar profile={avatarProfile} size="sm" showPresence={!isGroup} />
+        <UserAvatar profile={avatarProfile} size="md" showPresence={!isGroup} />
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold">{title}</p>
+          <p className="truncate text-[0.9rem] font-semibold">{title}</p>
           <p className="truncate text-[0.7rem] text-muted-foreground">
-            {typingNames.length > 0 ? (
-              <span className="font-semibold text-primary">
+            {activityLabel ? (
+              <span className="font-medium text-primary">{activityLabel}</span>
+            ) : typingNames.length > 0 ? (
+              <span className="font-medium text-primary">
                 {typingNames.length === 1
                   ? "Typing…"
                   : `${typingNames.length} people typing…`}
@@ -482,7 +541,7 @@ export function ChatThread({
             ) : isGroup ? (
               `${members.length} members${conversation.announce_only ? " · admins post" : ""}`
             ) : peerOnline ? (
-              <span className="text-emerald-600 dark:text-emerald-400">Online</span>
+              <span className="text-online">Online</span>
             ) : (
               "Offline"
             )}
@@ -710,12 +769,18 @@ export function ChatThread({
       </div>
 
       <div className="mx-auto w-full max-w-3xl">
-        <TypingIndicator names={typingNames} className="px-3 pb-1" />
+        <TypingIndicator
+          names={typingNames}
+          activity={activityLabel ? `${nameFor(primaryActivity[0])} is ${activityLabel.toLowerCase()}` : null}
+          className="px-3 pb-1"
+        />
       </div>
 
       <Composer
+        conversationId={conversation.id}
         onSend={handleSend}
         onTyping={notifyTyping}
+        onActivity={notifyActivity}
         replyTo={replyTo ? { message: replyTo, name: nameFor(replyTo.sender_id) } : null}
         onCancelReply={() => setReplyTo(null)}
         disabled={

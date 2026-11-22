@@ -1,4 +1,8 @@
-import { supabase } from "@/lib/supabase";
+import {
+  SUPABASE_ANON_KEY,
+  SUPABASE_URL,
+  supabase,
+} from "@/lib/supabase";
 import type {
   ConversationMember,
   ConversationSummary,
@@ -97,6 +101,7 @@ export async function sendMessage(input: {
   attachmentSize?: number | null;
   attachmentMime?: string | null;
   durationSeconds?: number | null;
+  waveform?: number[] | null;
   replyToId?: string | null;
   disappearSeconds?: number | null;
 }) {
@@ -115,6 +120,7 @@ export async function sendMessage(input: {
       attachment_size: input.attachmentSize ?? null,
       attachment_mime: input.attachmentMime ?? null,
       duration_seconds: input.durationSeconds ?? null,
+      waveform: input.waveform ?? null,
       reply_to_id: input.replyToId ?? null,
       expires_at: expiresAt,
     })
@@ -160,13 +166,57 @@ export async function uploadChatAttachment(
   conversationId: string,
   file: Blob,
   name: string,
+  onProgress?: (percent: number) => void,
 ) {
   const safeName = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
   const path = `${conversationId}/${crypto.randomUUID()}-${safeName}`;
+
+  if (SUPABASE_URL && SUPABASE_ANON_KEY && onProgress && file.size > 0) {
+    const baseUrl = SUPABASE_URL;
+    const apiKey = SUPABASE_ANON_KEY;
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(
+          "POST",
+          `${baseUrl}/storage/v1/object/media/${path.split("/").map(encodeURIComponent).join("/")}`,
+        );
+        xhr.setRequestHeader("apikey", apiKey);
+        if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("x-upsert", "false");
+        if (file.type) xhr.setRequestHeader("Content-Type", file.type);
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else
+            reject(
+              new Error(
+                `Upload failed (${xhr.status}). ${xhr.responseText.slice(0, 160)}`,
+              ),
+            );
+        };
+        xhr.onerror = () => reject(new Error("Upload failed. Check your connection."));
+        xhr.send(file);
+      });
+      onProgress(100);
+      return path;
+    } catch (err) {
+      // Fall back to the SDK upload if a proxy blocks the XHR endpoint.
+      console.warn("[PINGO] direct upload failed, retrying via SDK", err);
+    }
+  }
+
   const { error } = await supabase.storage
     .from("media")
     .upload(path, file, { contentType: file.type || undefined, cacheControl: "3600" });
   if (error) throw error;
+  onProgress?.(100);
   return path;
 }
 

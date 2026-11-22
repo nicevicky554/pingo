@@ -2,15 +2,20 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { durationLabel } from "@/lib/format";
+import { freshPrivateChannel } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Loader2,
+  Maximize2,
   Mic,
   MicOff,
+  Minimize2,
   Phone,
   PhoneOff,
+  RefreshCw,
+  SwitchCamera,
   Video as VideoIcon,
   VideoOff,
 } from "lucide-react";
@@ -61,19 +66,46 @@ const CallContext = createContext<CallContextValue>({
   startCall: async () => undefined,
 });
 
-function iceServers(): RTCIceServer[] {
-  const servers: RTCIceServer[] = [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ];
+const STUN_SERVERS: RTCIceServer[] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+];
+
+/**
+ * TURN credentials are minted by /api/turn on the server. The browser never
+ * receives a long-lived provider secret. A static VITE_TURN_* pair is only
+ * used as an explicit development fallback.
+ */
+async function iceServers(): Promise<RTCIceServer[]> {
+  const servers: RTCIceServer[] = [...STUN_SERVERS];
+  try {
+    const { data } = await supabase.auth.getSession();
+    const response = await fetch("/api/turn", {
+      headers: data.session?.access_token
+        ? { Authorization: `Bearer ${data.session.access_token}` }
+        : {},
+    });
+    if (response.ok) {
+      const payload = (await response.json()) as {
+        iceServers?: RTCIceServer[];
+      };
+      if (Array.isArray(payload.iceServers)) {
+        servers.push(...payload.iceServers);
+        return servers;
+      }
+    }
+  } catch {
+    // Running without a serverless function (plain vite preview): fall back.
+  }
+
   const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined;
   const turnUser = import.meta.env.VITE_TURN_USERNAME as string | undefined;
   const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL as
     | string
     | undefined;
-  if (turnUrl) {
+  if (turnUrl && turnUser && turnCredential) {
     servers.push({
-      urls: turnUrl,
+      urls: turnUrl.split(",").map((value) => value.trim()),
       username: turnUser,
       credential: turnCredential,
     });
@@ -88,6 +120,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const [quality, setQuality] = useState<{
+    height: number;
+    bitrateKbps: number;
+    packetLoss: number;
+    rttMs: number;
+  } | null>(null);
+  const retryRef = useRef(0);
+  const facingRef = useRef<"user" | "environment">("user");
+  const lastBytesRef = useRef<{ bytes: number; at: number } | null>(null);
 
   const sessionRef = useRef<CallSession | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -97,11 +140,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const opsRef = useRef<{
     invite: (payload: Record<string, unknown>) => void;
     answer: (payload: Record<string, unknown>) => void;
+    reoffer: (payload: Record<string, unknown>) => void;
+    reanswer: (payload: Record<string, unknown>) => void;
     candidate: (payload: Record<string, unknown>) => void;
     remoteEnd: (payload: Record<string, unknown>) => void;
   }>({
     invite: () => undefined,
     answer: () => undefined,
+    reoffer: () => undefined,
+    reanswer: () => undefined,
     candidate: () => undefined,
     remoteEnd: () => undefined,
   });
@@ -200,6 +247,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setRemoteStream(null);
       setLocalStream(null);
       setSeconds(0);
+      setReconnecting(false);
+      setMinimized(false);
+      setQuality(null);
+      retryRef.current = 0;
+      lastBytesRef.current = null;
       setSession(null);
       sessionRef.current = null;
       if (state === "missed") setNotice("No answer. The call was marked missed.");
@@ -212,13 +264,33 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const preparePeer = useCallback(
     async (kind: CallKind, peerId: string, callId: string) => {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: kind === "video",
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video:
+          kind === "video"
+            ? {
+                facingMode: facingRef.current,
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 },
+              }
+            : false,
       });
       localStreamRef.current = stream;
       setLocalStream(stream);
+      stream.getVideoTracks().forEach((track) => {
+        track.contentHint = "detail";
+      });
 
-      const pc = new RTCPeerConnection({ iceServers: iceServers() });
+      const pc = new RTCPeerConnection({
+        iceServers: await iceServers(),
+        iceCandidatePoolSize: 4,
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require",
+      });
       pcRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -233,17 +305,59 @@ export function CallProvider({ children }: { children: ReactNode }) {
       pc.ontrack = (event) => {
         setRemoteStream(event.streams[0]);
       };
+      pc.onicecandidateerror = (event) => {
+        console.warn("[PINGO] ICE candidate error", event.errorCode, event.errorText);
+      };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
+          retryRef.current = 0;
+          setReconnecting(false);
           const current = sessionRef.current;
           if (current && current.phase !== "active") {
             startedAtRef.current = startedAtRef.current ?? Date.now();
             updateSession({ phase: "active" });
           }
+          return;
+        }
+        if (pc.connectionState === "disconnected") {
+          setReconnecting(true);
+          return;
         }
         if (pc.connectionState === "failed") {
-          setNotice("The call connection failed. Check your network and TURN configuration.");
-          teardown("failed");
+          if (retryRef.current < 2) {
+            retryRef.current += 1;
+            setReconnecting(true);
+            try {
+              pc.restartIce();
+              void (async () => {
+                try {
+                  const offer = await pc.createOffer({ iceRestart: true });
+                  await pc.setLocalDescription(offer);
+                  await sendSignal(peerId, "call:reoffer", {
+                    call_id: callId,
+                    offer,
+                  });
+                } catch (error) {
+                  console.warn("[PINGO] ICE renegotiation failed", error);
+                }
+              })();
+            } catch (error) {
+              console.warn("[PINGO] ICE restart failed", error);
+            }
+            window.setTimeout(() => {
+              if (pcRef.current === pc && pc.connectionState === "failed") {
+                setReconnecting(false);
+                setNotice(
+                  "The call could not recover. A TURN relay may be required on this network.",
+                );
+                teardown("failed");
+              }
+            }, 12_000);
+          } else {
+            setReconnecting(false);
+            setNotice("The call connection failed. Check your network and TURN setup.");
+            teardown("failed");
+          }
         }
       };
       return { pc, stream };
@@ -418,7 +532,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
         .eq("call_id", current.callId)
         .eq("user_id", profile?.id ?? "");
 
-      startedAtRef.current = Date.now();
       await sendSignal(current.peer.id, "call:answer", {
         call_id: current.callId,
         answer,
@@ -475,6 +588,40 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [updateSession]);
 
+  const handleReoffer = useCallback(async (payload: Record<string, unknown>) => {
+    const current = sessionRef.current;
+    const pc = pcRef.current;
+    if (!current || !pc || String(payload.call_id) !== current.callId) return;
+    if (pc.signalingState !== "stable") return;
+    try {
+      await pc.setRemoteDescription(payload.offer as RTCSessionDescriptionInit);
+      for (const candidate of pendingCandidates.current) {
+        await pc.addIceCandidate(candidate).catch(() => undefined);
+      }
+      pendingCandidates.current = [];
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await sendSignal(current.peer.id, "call:reanswer", {
+        call_id: current.callId,
+        answer,
+      });
+    } catch (error) {
+      console.warn("[PINGO] could not answer ICE restart", error);
+    }
+  }, [sendSignal]);
+
+  const handleReanswer = useCallback(async (payload: Record<string, unknown>) => {
+    const current = sessionRef.current;
+    const pc = pcRef.current;
+    if (!current || !pc || String(payload.call_id) !== current.callId) return;
+    if (pc.signalingState === "stable") return;
+    try {
+      await pc.setRemoteDescription(payload.answer as RTCSessionDescriptionInit);
+    } catch (error) {
+      console.warn("[PINGO] could not apply ICE restart answer", error);
+    }
+  }, []);
+
   const handleCandidate = useCallback(
     async (payload: Record<string, unknown>) => {
       const current = sessionRef.current;
@@ -510,6 +657,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   opsRef.current = {
     invite: handleInvite,
     answer: (payload) => void handleAnswer(payload),
+    reoffer: (payload) => void handleReoffer(payload),
+    reanswer: (payload) => void handleReanswer(payload),
     candidate: (payload) => void handleCandidate(payload),
     remoteEnd: handleRemoteEnd,
   };
@@ -517,8 +666,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   // Inbox: only this user can read `user:<id>`.
   useEffect(() => {
     if (!profile?.id) return;
-    const channel = supabase.channel(`user:${profile.id}`, {
-      config: { private: true },
+    const channel = freshPrivateChannel(`user:${profile.id}`, {
+      private: true,
     });
     channel
       .on("broadcast", { event: "call:invite" }, ({ payload }) =>
@@ -526,6 +675,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       )
       .on("broadcast", { event: "call:answer" }, ({ payload }) =>
         opsRef.current.answer(payload as Record<string, unknown>),
+      )
+      .on("broadcast", { event: "call:reoffer" }, ({ payload }) =>
+        opsRef.current.reoffer(payload as Record<string, unknown>),
+      )
+      .on("broadcast", { event: "call:reanswer" }, ({ payload }) =>
+        opsRef.current.reanswer(payload as Record<string, unknown>),
       )
       .on("broadcast", { event: "call:ice" }, ({ payload }) =>
         opsRef.current.candidate(payload as Record<string, unknown>),
@@ -590,6 +745,64 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(interval);
   }, [session?.phase]);
 
+  // Real connection statistics; video bitrate adapts to measured packet loss.
+  useEffect(() => {
+    if (session?.phase !== "active") return;
+    const interval = window.setInterval(async () => {
+      const pc = pcRef.current;
+      if (!pc) return;
+      try {
+        const stats = await pc.getStats();
+        let height = 0;
+        let bytes = 0;
+        let loss = 0;
+        let rtt = 0;
+        stats.forEach((report) => {
+          if (report.type === "inbound-rtp" && report.kind === "video") {
+            height = report.frameHeight ?? height;
+            bytes = Math.max(bytes, report.bytesReceived ?? 0);
+            loss = Math.max(loss, (report.packetsLost ?? 0) > 0 && report.packetsReceived
+              ? ((report.packetsLost ?? 0) / ((report.packetsLost ?? 0) + report.packetsReceived)) * 100
+              : 0);
+          }
+          if (report.type === "candidate-pair" && report.state === "succeeded") {
+            rtt = Math.round((report.currentRoundTripTime ?? 0) * 1000);
+          }
+        });
+
+        const now = Date.now();
+        const previous = lastBytesRef.current;
+        const bitrateKbps =
+          previous && bytes > previous.bytes
+            ? Math.round(((bytes - previous.bytes) * 8) / (now - previous.at))
+            : 0;
+        lastBytesRef.current = { bytes, at: now };
+        setQuality({ height, bitrateKbps, packetLoss: Math.round(loss), rttMs: rtt });
+
+        if (session.kind === "video") {
+          const sender = pc
+            .getSenders()
+            .find((item) => item.track?.kind === "video");
+          if (sender) {
+            const params = sender.getParameters();
+            const targetKbps = loss > 10 ? 450 : loss > 4 ? 900 : 2600;
+            if (params.encodings?.length) {
+              params.encodings = params.encodings.map((encoding) => ({
+                ...encoding,
+                maxBitrate: targetKbps * 1000,
+                maxFramerate: loss > 8 ? 15 : 30,
+              }));
+              await sender.setParameters(params).catch(() => undefined);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("[PINGO] call stats unavailable", error);
+      }
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [session?.phase, session?.kind]);
+
   useEffect(() => {
     return () => {
       pcRef.current?.close();
@@ -620,6 +833,34 @@ export function CallProvider({ children }: { children: ReactNode }) {
     updateSession({ cameraOff: enabled });
   }, [updateSession]);
 
+  const switchCamera = useCallback(async () => {
+    const stream = localStreamRef.current;
+    const sender = pcRef.current
+      ?.getSenders()
+      .find((item) => item.track?.kind === "video");
+    if (!stream || !sender) return;
+    const next = facingRef.current === "user" ? "environment" : "user";
+    try {
+      const replacement = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: next, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      const track = replacement.getVideoTracks()[0];
+      if (!track) return;
+      track.contentHint = "detail";
+      await sender.replaceTrack(track);
+      stream.getVideoTracks().forEach((old) => {
+        stream.removeTrack(old);
+        old.stop();
+      });
+      stream.addTrack(track);
+      facingRef.current = next;
+      setLocalStream(new MediaStream(stream.getTracks()));
+    } catch (error) {
+      console.warn("[PINGO] camera switch failed", error);
+      setNotice("The other camera could not be opened on this device.");
+    }
+  }, []);
+
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
@@ -634,7 +875,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (remoteAudioRef.current && remoteStream && session?.kind === "voice") {
       remoteAudioRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream, localStream, session?.phase, session?.kind]);
+  }, [remoteStream, localStream, session?.phase, session?.kind, minimized]);
 
   const value = useMemo<CallContextValue>(
     () => ({ active: Boolean(session), startCall }),
@@ -657,31 +898,103 @@ export function CallProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {session && (
-        <div className="fixed inset-0 z-[60] flex flex-col bg-[#081218] text-white">
+      {session && minimized && (
+        <div className="fixed right-3 bottom-[72px] z-[60] flex w-[290px] items-center gap-2.5 rounded-xl border border-white/10 bg-[#0d1a22] p-2.5 text-white shadow-xl md:bottom-4">
+          {session.kind === "video" ? (
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="size-11 shrink-0 rounded-md bg-black object-cover"
+            />
+          ) : (
+            <>
+              <audio ref={remoteAudioRef} autoPlay className="hidden" />
+              <UserAvatar profile={session.peer} size="sm" />
+            </>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-semibold">
+              {session.peer.display_name || session.peer.username || "PINGO call"}
+            </p>
+            <p className="text-[0.65rem] text-white/60">
+              {reconnecting
+                ? "Reconnecting…"
+                : session.phase === "active"
+                  ? durationLabel(seconds)
+                  : "Connecting…"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMinimized(false)}
+            className="flex size-8 items-center justify-center rounded-full bg-white/10"
+            aria-label="Expand call"
+          >
+            <Maximize2 className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => teardown("ended")}
+            className="flex size-8 items-center justify-center rounded-full bg-destructive"
+            aria-label="End call"
+          >
+            <PhoneOff className="size-4" />
+          </button>
+        </div>
+      )}
+
+      {session && !minimized && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-[#0d1a22] text-white">
           {session.kind === "voice" && (
             <audio ref={remoteAudioRef} autoPlay className="hidden" />
           )}
 
-          <div className="flex items-center gap-3 px-4 py-4">
+          <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
             <UserAvatar profile={session.peer} size="sm" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold">
+              <p className="truncate text-sm font-semibold">
                 {session.peer.display_name || session.peer.username || "PINGO call"}
               </p>
               <p className="text-xs text-white/60">
-                {session.phase === "incoming"
-                  ? `Incoming ${session.kind} call`
-                  : session.phase === "outgoing"
-                    ? "Calling…"
-                    : session.phase === "connecting"
-                      ? "Connecting…"
-                      : durationLabel(seconds)}
+                {reconnecting
+                  ? "Reconnecting — keeping the call open…"
+                  : session.phase === "incoming"
+                    ? `Incoming ${session.kind} call`
+                    : session.phase === "outgoing"
+                      ? "Calling…"
+                      : session.phase === "connecting"
+                        ? "Connecting…"
+                        : durationLabel(seconds)}
               </p>
             </div>
-            <span className="rounded-full bg-white/10 px-2.5 py-1 text-[0.6rem] font-bold uppercase tracking-wide">
-              {session.kind}
-            </span>
+            {session.phase === "active" && quality && session.kind === "video" && (
+              <span className="hidden rounded-full bg-white/10 px-2.5 py-1 text-[0.6rem] font-medium tabular-nums sm:inline">
+                {quality.height >= 2160
+                  ? "4K"
+                  : quality.height >= 1080
+                    ? "1080p"
+                    : quality.height >= 720
+                      ? "720p"
+                      : quality.height > 0
+                        ? `${quality.height}p`
+                        : "audio"}
+                {" · "}
+                {quality.bitrateKbps > 0
+                  ? `${Math.round(quality.bitrateKbps / 100) / 10} Mbps`
+                  : "measuring"}
+              </span>
+            )}
+            {session.phase === "active" && (
+              <button
+                type="button"
+                onClick={() => setMinimized(true)}
+                className="flex size-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+                aria-label="Minimize call"
+              >
+                <Minimize2 className="size-4" />
+              </button>
+            )}
           </div>
 
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
@@ -693,16 +1006,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   playsInline
                   className="size-full bg-black object-contain"
                 />
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="absolute right-4 bottom-4 h-36 w-28 rounded-xl border border-white/20 bg-black object-cover sm:h-44 sm:w-36"
-                />
+                {session.phase !== "incoming" && !session.cameraOff && (
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="absolute right-4 bottom-4 h-32 w-24 rounded-lg border border-white/20 bg-black object-cover sm:h-44 sm:w-32"
+                  />
+                )}
               </>
             ) : (
-              <div className="flex flex-col items-center gap-4">
+              <div className="flex flex-col items-center gap-4 px-6">
                 <UserAvatar profile={session.peer} size="xl" />
                 <p className="text-lg font-semibold">
                   {session.phase === "active"
@@ -711,22 +1026,33 @@ export function CallProvider({ children }: { children: ReactNode }) {
                       ? "Incoming voice call"
                       : "Ringing…"}
                 </p>
-                {session.phase !== "incoming" && session.phase !== "outgoing" && (
-                  <p className="max-w-xs text-center text-xs text-white/50">
-                    Audio is live over WebRTC. Group calls require the SFU phase.
+                {session.phase === "active" && (
+                  <p className="max-w-xs text-center text-[0.7rem] text-white/50">
+                    {quality
+                      ? `Round-trip ${quality.rttMs} ms · ${quality.packetLoss}% packet loss`
+                      : "Measuring connection…"}
                   </p>
                 )}
               </div>
             )}
 
-            {session.phase === "connecting" && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                <Loader2 className="size-7 animate-spin" />
+            {(session.phase === "connecting" || reconnecting) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/55">
+                {reconnecting ? (
+                  <RefreshCw className="size-6 animate-spin" />
+                ) : (
+                  <Loader2 className="size-7 animate-spin" />
+                )}
+                <p className="text-xs text-white/70">
+                  {reconnecting
+                    ? "Network changed. Reconnecting…"
+                    : "Establishing secure media…"}
+                </p>
               </div>
             )}
           </div>
 
-          <div className="safe-bottom flex items-center justify-center gap-4 px-4 py-6">
+          <div className="safe-bottom flex items-center justify-center gap-3 px-4 py-6">
             {session.phase === "incoming" ? (
               <>
                 <Button
@@ -761,19 +1087,30 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   )}
                 </Button>
                 {session.kind === "video" && (
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    aria-label={session.cameraOff ? "Turn camera on" : "Turn camera off"}
-                    className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
-                    onClick={toggleCamera}
-                  >
-                    {session.cameraOff ? (
-                      <VideoOff className="size-5" />
-                    ) : (
-                      <VideoIcon className="size-5" />
-                    )}
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      aria-label={session.cameraOff ? "Turn camera on" : "Turn camera off"}
+                      className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
+                      onClick={toggleCamera}
+                    >
+                      {session.cameraOff ? (
+                        <VideoOff className="size-5" />
+                      ) : (
+                        <VideoIcon className="size-5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      aria-label="Switch camera"
+                      className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
+                      onClick={() => void switchCamera()}
+                    >
+                      <SwitchCamera className="size-5" />
+                    </Button>
+                  </>
                 )}
                 <Button
                   variant="destructive"

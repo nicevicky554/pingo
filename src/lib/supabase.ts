@@ -1,8 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ??
+export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as
+  | string
+  | undefined;
+export const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY ??
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string | undefined;
+
+const url = SUPABASE_URL;
+const anonKey = SUPABASE_ANON_KEY;
 
 /** True when the project has a Supabase URL and public key configured. */
 export const isSupabaseConfigured = Boolean(url && anonKey);

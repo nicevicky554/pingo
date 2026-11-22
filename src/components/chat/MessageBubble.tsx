@@ -1,6 +1,11 @@
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -27,6 +32,9 @@ import {
   SmilePlus,
   Trash2,
   UserX,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -37,6 +45,8 @@ type ReceiptState = "sent" | "delivered" | "read";
 function Attachment({ message }: { message: Message }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerZoom, setViewerZoom] = useState(1);
 
   useEffect(() => {
     let active = true;
@@ -55,33 +65,103 @@ function Attachment({ message }: { message: Message }) {
 
   if (message.kind === "image") {
     return (
-      <div className="mb-1.5 overflow-hidden rounded-lg bg-muted">
+      <div className="mb-1.5 overflow-hidden rounded-md bg-muted">
         {url && !failed ? (
-          <a href={url} target="_blank" rel="noreferrer">
+          <button type="button" onClick={() => setViewerOpen(true)}>
             <img
               src={url}
               alt={message.attachment_name ?? "Shared photo"}
-              className="max-h-72 w-full max-w-xs object-cover"
+              className="max-h-72 w-full max-w-[280px] object-cover"
               loading="lazy"
             />
-          </a>
+          </button>
         ) : (
           <div className="flex h-32 w-56 items-center justify-center text-xs text-muted-foreground">
             {failed ? "Photo unavailable" : "Loading photo…"}
           </div>
         )}
+        <Dialog
+          open={viewerOpen}
+          onOpenChange={(open) => {
+            setViewerOpen(open);
+            if (!open) setViewerZoom(1);
+          }}
+        >
+          <DialogContent
+            className="max-w-4xl border-0 bg-black p-2 text-white sm:max-w-4xl"
+            showCloseButton={false}
+          >
+            <DialogTitle className="sr-only">
+              {message.attachment_name ?? "Shared photo"}
+            </DialogTitle>
+            <div className="absolute top-2 right-2 z-10 flex gap-1">
+              <button
+                type="button"
+                onClick={() => setViewerZoom((value) => Math.max(1, value - 0.5))}
+                className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white"
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewerZoom((value) => Math.min(3, value + 0.5))}
+                className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white"
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="size-4" />
+              </button>
+              {url && (
+                <a
+                  href={url}
+                  download={message.attachment_name ?? "pingo-photo"}
+                  className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white"
+                  aria-label="Download photo"
+                >
+                  <Download className="size-4" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setViewerOpen(false)}
+                className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white"
+                aria-label="Close photo"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            {url && (
+              <img
+                src={url}
+                alt={message.attachment_name ?? "Shared photo"}
+                className="max-h-[82dvh] w-full object-contain transition-transform"
+                style={{ transform: `scale(${viewerZoom})` }}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
+  if (message.kind === "video") {
+    return url && !failed ? (
+      <video
+        src={url}
+        controls
+        playsInline
+        preload="metadata"
+        className="mb-1.5 max-h-72 w-full max-w-[280px] rounded-md bg-black"
+      />
+    ) : (
+      <div className="mb-1.5 flex h-32 w-56 items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
+        {failed ? "Video unavailable" : "Loading video…"}
       </div>
     );
   }
 
   if (message.kind === "voice") {
-    return (
-      <VoicePlayer
-        url={url}
-        minutes={durationLabel(message.duration_seconds)}
-        failed={failed}
-      />
-    );
+    return <VoicePlayer message={message} url={url} failed={failed} />;
   }
 
   return (
@@ -113,24 +193,33 @@ function Attachment({ message }: { message: Message }) {
 }
 
 function VoicePlayer({
+  message,
   url,
-  minutes,
   failed,
 }: {
+  message: Message;
   url: string | null;
-  minutes: string;
   failed: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [seconds, setSeconds] = useState(message.duration_seconds ?? 0);
+  const [rate, setRate] = useState(1);
+  const peaks = message.waveform ?? [];
+  const total = seconds || message.duration_seconds || 0;
 
   return (
-    <div className="mb-1 flex min-w-[190px] items-center gap-2.5">
+    <div className="mb-1 flex min-w-[210px] items-center gap-2">
       {url && (
         <audio
           ref={audioRef}
           src={url}
+          preload="metadata"
+          onLoadedMetadata={(event) => {
+            const duration = event.currentTarget.duration;
+            if (Number.isFinite(duration)) setSeconds(duration);
+          }}
           onTimeUpdate={(event) => {
             const audio = event.currentTarget;
             setProgress(audio.duration ? audio.currentTime / audio.duration : 0);
@@ -151,6 +240,7 @@ function VoicePlayer({
             audio.pause();
             setPlaying(false);
           } else {
+            audio.playbackRate = rate;
             void audio.play();
             setPlaying(true);
           }
@@ -160,24 +250,62 @@ function VoicePlayer({
       >
         {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
       </button>
-      <span className="flex h-7 flex-1 items-center gap-[2px]">
-        {Array.from({ length: 26 }).map((_, index) => {
-          const height = 5 + ((index * 7) % 17);
-          const played = index / 26 <= progress;
-          return (
-            <span
-              key={index}
-              className={cn(
-                "w-[2px] rounded-full",
-                played ? "bg-current" : "bg-current/30",
-              )}
-              style={{ height }}
-            />
+
+      <button
+        type="button"
+        disabled={!url}
+        aria-label="Seek voice message"
+        className="flex h-8 flex-1 items-center gap-[2px] text-left"
+        onClick={(event) => {
+          const audio = audioRef.current;
+          if (!audio || !audio.duration) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = Math.min(
+            1,
+            Math.max(0, (event.clientX - rect.left) / rect.width),
           );
-        })}
-      </span>
-      <span className="text-[0.65rem] font-medium opacity-70">
-        {failed ? "Unavailable" : minutes}
+          audio.currentTime = ratio * audio.duration;
+          setProgress(ratio);
+        }}
+      >
+        {peaks.length > 0
+          ? peaks.map((peak, index) => (
+              <span
+                key={index}
+                className={cn(
+                  "w-[2px] shrink-0 rounded-full transition-colors",
+                  index / peaks.length <= progress
+                    ? "bg-current"
+                    : "bg-current/30",
+                )}
+                style={{ height: `${Math.max(4, (peak / 100) * 26)}px` }}
+              />
+            ))
+          : (
+            <span className="relative h-[2px] w-full rounded-full bg-current/25">
+              <span
+                className="absolute inset-y-0 left-0 rounded-full bg-current"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </span>
+          )}
+      </button>
+
+      <button
+        type="button"
+        disabled={!url}
+        className="shrink-0 rounded px-1 text-[0.62rem] font-semibold opacity-80"
+        aria-label="Change playback speed"
+        onClick={() => {
+          const next = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1;
+          setRate(next);
+          if (audioRef.current) audioRef.current.playbackRate = next;
+        }}
+      >
+        {rate}×
+      </button>
+      <span className="w-8 shrink-0 text-right text-[0.62rem] tabular-nums opacity-70">
+        {failed ? "—" : `${Math.floor(total / 60)}:${String(Math.floor(total % 60)).padStart(2, "0")}`}
       </span>
     </div>
   );
@@ -227,6 +355,7 @@ export function MessageBubble({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
   const [saving, setSaving] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   // Deletion for everyone removes the message entirely — no tombstone.
   if (message.deleted_at) return null;
@@ -270,22 +399,16 @@ export function MessageBubble({
         )}
 
         <div
+          onClick={() => setActionsOpen((open) => !open)}
           className={cn(
-            "rounded-2xl px-3.5 py-2.5 text-[0.84rem] leading-[1.45]",
+            "px-2.5 py-1.5 text-[0.86rem] leading-[1.45] transition-colors",
             isOwn
-              ? "rounded-br-md bg-primary text-primary-foreground"
-              : "rounded-bl-md border border-border bg-card text-card-foreground",
+              ? "rounded-[10px] rounded-br-[3px] bg-bubble-out text-bubble-out-foreground"
+              : "rounded-[10px] rounded-bl-[3px] border border-border/70 bg-bubble-in text-bubble-in-foreground",
           )}
         >
           {replyTo && (
-            <div
-              className={cn(
-                "mb-2 rounded-lg border-l-2 px-2.5 py-1.5 text-[0.72rem]",
-                isOwn
-                  ? "border-primary-foreground/60 bg-primary-foreground/10"
-                  : "border-primary bg-primary/5",
-              )}
-            >
+            <div className="mb-1.5 rounded-md border-l-2 border-primary bg-primary/5 px-2 py-1 text-[0.72rem]">
               <p className="font-bold opacity-90">{replySenderName || "Message"}</p>
               <p className="line-clamp-2 opacity-70">
                 {replyTo.deleted_at
@@ -335,15 +458,15 @@ export function MessageBubble({
 
           <div
             className={cn(
-              "mt-1 flex items-center justify-end gap-1 text-[0.6rem]",
-              isOwn ? "text-primary-foreground/75" : "text-muted-foreground",
+              "mt-0.5 flex items-center justify-end gap-1 text-[0.62rem]",
+              isOwn ? "text-bubble-out-foreground/55" : "text-muted-foreground",
             )}
           >
             {message.edited_at && <span>edited</span>}
             <span>{timeOf(message.created_at)}</span>
             {isOwn &&
               (receipt === "read" ? (
-                <CheckCheck className="size-3.5 text-sky-200" aria-label="Read" />
+                <CheckCheck className="size-3.5 text-primary" aria-label="Read" />
               ) : receipt === "delivered" ? (
                 <CheckCheck className="size-3.5" aria-label="Delivered" />
               ) : (
@@ -386,7 +509,8 @@ export function MessageBubble({
 
         <div
           className={cn(
-            "mt-1 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+            "mt-0.5 flex items-center gap-0.5 transition-opacity focus-within:opacity-100",
+            actionsOpen ? "opacity-100" : "opacity-0 sm:group-hover:opacity-100",
             isOwn ? "justify-end" : "justify-start",
           )}
         >

@@ -7,12 +7,15 @@ board" prototype; Convex has been removed entirely. There is no second database.
 - **Web app:** React 19, TypeScript, Vite, Tailwind v4, shadcn/ui, Lucide icons
 - **Backend:** Supabase PostgreSQL, Auth, Storage, Realtime, Row Level Security
 - **Admin app:** separate `/admin` console guarded by database roles
-- **Design:** deep teal `#126B78`, turquoise `#24B6A5`, light `#F4F7F8`, dark `#101C25`
+- **Design:** neutral surfaces with a teal accent (`#167C80` light / `#38B7A8` dark), Inter, Lucide icons
+- **Deploy:** Vercel static SPA + one serverless TURN function; see `DEPLOYMENT.md`
 
 ## 1. Required setup
 
-PINGO refuses to pretend it is connected. Until these steps are done, `/auth`
-and `/app/*` show a setup screen instead of a broken UI.
+PINGO refuses to pretend it is connected. Until these steps are done, `/` and
+`/app/*` show a setup screen instead of a broken UI. The root URL is the
+application entry point: signed-out visitors see phone sign-in, not a marketing
+page.
 
 1. Create a Supabase project.
 2. Add these variables in the project's **Keys** tab:
@@ -21,6 +24,7 @@ and `/app/*` show a setup screen instead of a broken UI.
 3. Apply both migrations in order:
    - `supabase/migrations/0001_pingo_core.sql`
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
+   - `supabase/migrations/0003_media_waveforms.sql`
 
    With the Supabase CLI:
 
@@ -44,7 +48,9 @@ and `/app/*` show a setup screen instead of a broken UI.
    works only while no administrator exists and writes an audit entry.
 
 No credentials are committed to this repository. `VITE_*` values are public by
-definition; privileged keys must never be used client-side.
+definition; privileged keys must never be used client-side. See
+[`DEPLOYMENT.md`](./DEPLOYMENT.md) for Vercel, environment variables and TURN
+setup, and [`env.example`](./env.example) for the full list.
 
 ## 2. What is implemented
 
@@ -97,11 +103,17 @@ definition; privileged keys must never be used client-side.
 
 ### Calling (Phase 6, 1:1)
 
-- Real WebRTC peer connections with STUN, optional TURN via
-  `VITE_TURN_URL` / `VITE_TURN_USERNAME` / `VITE_TURN_CREDENTIAL`, and Supabase
-  Realtime broadcast signalling over private `user:<id>` topics.
+- Real WebRTC peer connections with STUN and server-minted TURN credentials from
+  `/api/turn` (Twilio Network Traversal Service); Supabase Realtime broadcast
+  signalling over private `user:<id>` topics.
 - Voice and video call buttons in direct conversations, incoming-call overlay,
-  accept/decline, mute, camera toggle, live duration, end call.
+  accept/decline, mute, camera toggle, camera switch, minimize, live duration,
+  end call.
+- ICE restart and a visible reconnecting state for network changes instead of an
+  immediate disconnect; no artificial maximum call duration.
+- Video quality adapts from measured `getStats()` packet loss; the displayed
+  resolution and bitrate come from the actual inbound stream, never a fixed
+  claim of 4K.
 - Call outcomes (ringing, accepted, declined, missed, failed, ended, duration)
   are written to `calls` and `call_participants`; the Calls page reads them in
   realtime. Ring timeouts mark missed calls instead of pretending success.
@@ -154,7 +166,8 @@ or absent.
 
 1. **Group calling / SFU (Phase 6 remainder).** 1:1 calls are implemented; group
    calls need LiveKit or another SFU and are disabled with an explanation. TURN
-   must be configured for reliable calls across strict NATs.
+   is wired through `/api/turn` but requires Twilio credentials before it can
+   relay media across strict NATs.
 2. **End-to-end encryption.** PINGO does not claim E2EE. Transport is TLS and
    data is protected by RLS, not the Signal protocol.
 3. **Push notifications.** In-app and browser notifications work while the app is
@@ -181,23 +194,33 @@ or absent.
     global sign-out; per-device revocation UI is not built.
 13. **Account deletion** records an audited support request; a service-role
     deletion Edge Function is required to actually erase auth users.
-14. **Channels in the chat list**, channel comments/discussion groups, scheduled
-    posts and analytics are not in the UI.
+14. **Channels** appear in Chats once followed; channel comments/discussion
+    groups, scheduled posts and analytics are not in the UI.
 15. **Communities** do not yet create groups inline or manage member permissions
     beyond owner/member.
-16. **Call testing was not executed** here: it needs two signed-in testers,
-    camera/microphone permissions and preferably TURN credentials.
+16. **No runtime testing on this host.** TypeScript passes, but sign-in,
+    messaging, uploads, waveforms, TURN relay and calls could not be exercised
+    without a Supabase project, a TURN account and two testers. Nothing below is
+    claimed as runtime-verified.
+17. **Attachment uploads** send via XHR for real byte-level progress and fall
+    back to the Supabase SDK if the direct endpoint is blocked.
 
 ## 5. Verification performed
 
-- `bun tsc -b --noEmit` passes with the Supabase client and all new pages.
+- `bun tsc -b --noEmit` passes for the whole client after the redesign, the
+  notification fix, the four-step onboarding, the waveform/attachment work and
+  the call reliability changes.
+- `api/turn.ts` compiles with `bun build --target=node`; `vercel.json` parses as
+  valid JSON.
 - Convex packages, config and generated code removed; `bun install` clean.
 - The migrations were written but **not executed** against a live Supabase project
   because no credentials are configured on this host. Apply them before expecting
   sign-in or messaging to work.
-- Browser-level flows (test sign-in, two-account messaging, WebRTC calls) could
-  not be executed without a Supabase project and two testers. No such tests are
-  reported as passing.
+- No Supabase project, TURN account, browser session, camera/microphone or second
+  tester is available on this host. Test-mode sign-in, OTP, profile upload,
+  messaging, typing, voice waveforms, notification realtime, TURN relay and
+  WebRTC calls have **not** been executed. TypeScript passing is not runtime
+  proof.
 
 ## 6. Next phases
 
@@ -207,8 +230,8 @@ or absent.
    device storage.
 3. **Phase 5:** 2FA, device sessions, audited account deletion Edge Function,
    Signal-protocol E2EE design (or an explicit decision not to claim it).
-4. **Phase 6:** WebRTC 1:1 calling, TURN, LiveKit SFU for groups, adaptive
-   resolution with real negotiated statistics.
+4. **Phase 6:** LiveKit SFU for group calls, TURN credential refresh for very
+   long sessions, bandwidth probing beyond loss-based adaptation.
 5. **Phase 7 remaining:** announcements composer, storage/database health panels,
    infrastructure metrics.
 6. **Phase 8:** run the test matrix from the brief against a real deployment.
@@ -221,10 +244,13 @@ src/
   components/       UI primitives, avatars, chat, admin shell
   hooks/            useAuth
   lib/              supabase client, chat data access, types, formatting
-  pages/            Landing, Auth, Onboarding, 404
+  pages/            Home, Auth, Onboarding, 404
     app/            Chats, Updates, Communities, Calls, Settings
     admin/          Dashboard, Users, Reports, Access, Setup
-  providers/        AuthProvider, PresenceProvider, CallProvider
+  providers/        AuthProvider, PresenceProvider, CallProvider, NotificationsProvider
+api/
+  turn.ts           verified, short-lived TURN credentials
 supabase/
-  migrations/       0001_pingo_core.sql, 0002_test_auth_calls_notifications.sql
+  migrations/       0001_pingo_core.sql, 0002_test_auth_calls_notifications.sql,
+                    0003_media_waveforms.sql
 ```

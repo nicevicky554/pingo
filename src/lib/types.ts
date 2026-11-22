@@ -55,6 +55,7 @@ export type Message = {
   attachment_size: number | null;
   attachment_mime: string | null;
   duration_seconds: number | null;
+  waveform: number[] | null;
   reply_to_id: string | null;
   edited_at: string | null;
   deleted_at: string | null;

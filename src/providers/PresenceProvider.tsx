@@ -1,3 +1,4 @@
+import { freshPrivateChannel } from "@/lib/realtime";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
   createContext,
@@ -32,11 +33,9 @@ export function PresenceProvider({
       return;
     }
 
-    const channel = supabase.channel("presence:global", {
-      config: {
-        private: true,
-        presence: { key: userId },
-      },
+    const channel = freshPrivateChannel("presence:global", {
+      private: true,
+      presence: { key: userId },
     });
 
     channel

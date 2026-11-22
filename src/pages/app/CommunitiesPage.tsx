@@ -85,12 +85,9 @@ export default function CommunitiesPage() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-card/95 px-4 backdrop-blur sm:px-6">
-        <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <UsersRound className="size-5" />
-        </span>
+      <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
         <div className="min-w-0 flex-1">
-          <h1 className="text-base font-extrabold">Communities</h1>
+          <h1 className="text-[1.05rem] font-semibold tracking-[-0.01em]">Communities</h1>
           <p className="text-[0.68rem] text-muted-foreground">
             Groups that belong together
           </p>
