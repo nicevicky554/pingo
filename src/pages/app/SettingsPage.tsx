@@ -258,6 +258,8 @@ export default function SettingsPage() {
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="privacy">Privacy</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
+            <TabsTrigger value="notifications">Notifications</TabsTrigger>
+            <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="account">Account</TabsTrigger>
           </TabsList>
 
@@ -567,6 +569,115 @@ export default function SettingsPage() {
                 </section>
               </>
             )}
+          </TabsContent>
+
+          {/* Notifications */}
+          <TabsContent value="notifications" className="mt-6 space-y-4">
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="text-sm font-bold">Notification preferences</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                These control in-app and browser notifications. Muted
+                conversations always stay quiet.
+              </p>
+              <div className="mt-4 divide-y divide-border">
+                {(
+                  [
+                    ["messages", "Direct messages"],
+                    ["groups", "Group messages"],
+                    ["calls", "Calls"],
+                    ["sound", "Sounds"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    className="flex items-center justify-between gap-4 py-3"
+                  >
+                    <span className="text-sm">{label}</span>
+                    <Switch
+                      checked={localSettings?.notifications?.[key] !== false}
+                      onCheckedChange={(checked) =>
+                        void saveSettings({
+                          notifications: {
+                            ...(localSettings?.notifications ?? {}),
+                            [key]: checked,
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+          </TabsContent>
+
+          {/* Security */}
+          <TabsContent value="security" className="mt-6 space-y-4">
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="flex items-center gap-2 text-sm font-bold">
+                <Smartphone className="size-4 text-primary" /> Active session
+              </h2>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Signed in as</dt>
+                  <dd className="font-medium">
+                    {profile.username ? `@${profile.username}` : profile.display_name}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Phone</dt>
+                  <dd className="font-medium">{session?.user.phone ?? "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Session started</dt>
+                  <dd className="font-medium">
+                    {session?.user.last_sign_in_at
+                      ? new Date(session.user.last_sign_in_at).toLocaleString()
+                      : "—"}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                Sessions are issued and refreshed by Supabase Auth. Signing out
+                everywhere revokes refresh tokens on all devices.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={async () => {
+                    await supabase.auth.signOut({ scope: "global" });
+                    navigate("/");
+                  }}
+                >
+                  <LogOut className="size-4" /> Sign out everywhere
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => void signOut().then(() => navigate("/"))}
+                >
+                  Sign out here
+                </Button>
+              </div>
+            </section>
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="text-sm font-bold">Read receipts</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Turning this off stops sending read receipts and hides read
+                ticks. Delivered ticks still reflect server delivery.
+              </p>
+              <label className="mt-4 flex items-center justify-between gap-4">
+                <span className="text-sm">Send read receipts</span>
+                <Switch
+                  checked={localSettings?.read_receipts !== false}
+                  onCheckedChange={(checked) =>
+                    void saveSettings({ read_receipts: checked })
+                  }
+                />
+              </label>
+            </section>
           </TabsContent>
 
           {/* Account */}

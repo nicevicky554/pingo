@@ -1,3 +1,4 @@
+import { EmojiPicker } from "@/components/chat/EmojiPicker";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
@@ -23,6 +24,7 @@ import {
   Mic,
   Paperclip,
   Send,
+  Smile,
   Square,
   Video,
   X,
@@ -90,12 +92,20 @@ export function Composer({
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [pendingVoice, setPendingVoice] = useState<{
+    blob: Blob;
+    url: string;
+    seconds: number;
+    peaks: number[];
+  } | null>(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [livePeaks, setLivePeaks] = useState<number[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   const imageInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
@@ -152,34 +162,38 @@ export function Composer({
 
   async function submit() {
     const body = text.trim();
-    if ((!body && !file) || sending) return;
+    if ((!body && !file) || sendingRef.current) return;
+    sendingRef.current = true;
+    const attachment = file;
     setSending(true);
-    setProgress(file ? 0 : 100);
+    setProgress(attachment ? 0 : 100);
     setError(null);
-    if (file) onActivity?.("uploading");
+    // Clear immediately; the optimistic message is already in the thread.
+    setText("");
+    setFile(null);
+    window.sessionStorage.removeItem(draftKey);
+    if (attachment) onActivity?.("uploading");
     try {
       await onSend(
         {
           body,
-          file,
-          fileName: file?.name,
-          kind: file
-            ? file.type.startsWith("image/")
+          file: attachment,
+          fileName: attachment?.name,
+          kind: attachment
+            ? attachment.type.startsWith("image/")
               ? "image"
-              : file.type.startsWith("video/")
+              : attachment.type.startsWith("video/")
                 ? "video"
                 : "file"
             : "text",
         },
         setProgress,
       );
-      setText("");
-      setFile(null);
-      window.sessionStorage.removeItem(draftKey);
       onCancelReply?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Message could not be sent.");
     } finally {
+      sendingRef.current = false;
       setSending(false);
       setProgress(0);
       onActivity?.("");
@@ -235,30 +249,12 @@ export function Composer({
         });
         if (blob.size === 0) return;
         const peaks = await extractPeaks(blob);
-        setSending(true);
-        setProgress(0);
-        onActivity?.("uploading");
-        try {
-          await onSend(
-            {
-              body: "",
-              file: blob,
-              fileName: `voice-${Date.now()}.webm`,
-              kind: "voice",
-              durationSeconds: seconds,
-              waveform: peaks.length > 0 ? peaks : live,
-            },
-            setProgress,
-          );
-        } catch (err) {
-          setError(
-            err instanceof Error ? err.message : "Voice note failed to send.",
-          );
-        } finally {
-          setSending(false);
-          setProgress(0);
-          onActivity?.("");
-        }
+        setPendingVoice({
+          blob,
+          url: URL.createObjectURL(blob),
+          seconds,
+          peaks: peaks.length > 0 ? peaks : live,
+        });
       };
 
       recorder.start(250);
@@ -309,7 +305,7 @@ export function Composer({
 
   if (disabled) {
     return (
-      <div className="border-t border-border bg-card px-4 py-3 text-center text-xs text-muted-foreground">
+      <div className="glass mx-2 mb-2 rounded-xl px-4 py-3 text-center text-xs text-muted-foreground">
         {disabledReason ?? "You cannot send messages in this conversation."}
       </div>
     );
@@ -337,7 +333,7 @@ export function Composer({
   );
 
   return (
-    <div className="border-t border-border bg-card px-2 pt-2 pb-2 sm:px-3">
+    <div className="glass safe-bottom mx-2 mb-2 rounded-xl px-2 pt-2 pb-2 sm:mx-3">
       <input
         ref={imageInput}
         type="file"
@@ -397,7 +393,15 @@ export function Composer({
 
       {file && (
         <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-secondary/60 px-2.5 py-1.5">
-          <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+          {file.type.startsWith("image/") ? (
+            <img
+              src={URL.createObjectURL(file)}
+              alt="Attachment preview"
+              className="size-10 shrink-0 rounded object-cover"
+            />
+          ) : (
+            <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
           <span className="min-w-0 flex-1 truncate text-xs">{file.name}</span>
           <span className="shrink-0 text-[0.65rem] text-muted-foreground">
             {(file.size / 1024 / 1024).toFixed(1)} MB
@@ -413,7 +417,64 @@ export function Composer({
         </div>
       )}
 
-      {sending && file && (
+      {pendingVoice && !recording && (
+        <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-secondary/60 px-2.5 py-2">
+          <audio src={pendingVoice.url} controls className="h-8 min-w-0 flex-1" />
+          <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
+            {Math.floor(pendingVoice.seconds / 60)}:
+            {String(pendingVoice.seconds % 60).padStart(2, "0")}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              URL.revokeObjectURL(pendingVoice.url);
+              setPendingVoice(null);
+            }}
+            aria-label="Discard voice note"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+          <Button
+            size="icon"
+            className="size-8 shrink-0 rounded-full"
+            aria-label="Send voice note"
+            disabled={sending}
+            onClick={async () => {
+              setSending(true);
+              setProgress(0);
+              onActivity?.("uploading");
+              try {
+                await onSend(
+                  {
+                    body: "",
+                    file: pendingVoice.blob,
+                    fileName: `voice-${Date.now()}.webm`,
+                    kind: "voice",
+                    durationSeconds: pendingVoice.seconds,
+                    waveform: pendingVoice.peaks,
+                  },
+                  setProgress,
+                );
+                URL.revokeObjectURL(pendingVoice.url);
+                setPendingVoice(null);
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "Voice note failed to send.",
+                );
+              } finally {
+                setSending(false);
+                setProgress(0);
+                onActivity?.("");
+              }
+            }}
+          >
+            {sending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+          </Button>
+        </div>
+      )}
+
+      {sending && (file || pendingVoice) && (
         <div className="mb-2">
           <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
             <div
@@ -516,6 +577,28 @@ export function Composer({
               </PopoverContent>
             </Popover>
           )}
+
+          <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Emoji"
+                className="size-9 shrink-0 text-muted-foreground"
+              >
+                <Smile className="size-[20px]" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" side="top" className="w-auto p-0">
+              <EmojiPicker
+                onSelect={(emoji) => {
+                  setText((current) => current + emoji);
+                  textareaRef.current?.focus();
+                }}
+              />
+            </PopoverContent>
+          </Popover>
 
           <Textarea
             ref={textareaRef}

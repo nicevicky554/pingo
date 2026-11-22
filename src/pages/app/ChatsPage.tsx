@@ -1,4 +1,5 @@
 import { ChatThread } from "@/components/chat/ChatThread";
+import { CreateMenu } from "@/components/chat/CreateMenu";
 import { NewChatDialog } from "@/components/chat/NewChatDialog";
 import { NotificationsMenu } from "@/components/NotificationsMenu";
 import { PingoMark } from "@/components/Wordmark";
@@ -29,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 type MemberWithProfile = ConversationMember & { profile: Profile | null };
 type MessageHit = {
@@ -204,16 +205,28 @@ export default function ChatsPage() {
           <h1 className="flex-1 text-[1.05rem] font-semibold tracking-[-0.01em]">
             Chats
           </h1>
-          <NotificationsMenu compact />
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-9 text-muted-foreground"
-            onClick={() => setNewChatOpen(true)}
-            aria-label="New conversation"
+          <Link
+            to="/app/search"
+            aria-label="Search PINGO"
+            className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
-            <Plus className="size-[21px]" />
-          </Button>
+            <Search className="size-[20px]" />
+          </Link>
+          <NotificationsMenu compact />
+          <div className="hidden md:block">
+            <CreateMenu
+              trigger={
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-9 text-muted-foreground"
+                  aria-label="New conversation"
+                >
+                  <Plus className="size-[21px]" />
+                </Button>
+              }
+            />
+          </div>
         </header>
 
         <div className="px-3 pb-2">
@@ -398,9 +411,9 @@ export default function ChatsPage() {
                     Channels
                   </p>
                   {channels.map((channel) => (
-                    <a
+                    <Link
                       key={channel.id}
-                      href="/app/updates"
+                      to={`/app/channels/${channel.id}`}
                       className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-secondary/70"
                     >
                       <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
@@ -414,7 +427,7 @@ export default function ChatsPage() {
                           @{channel.username}
                         </span>
                       </span>
-                    </a>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -482,6 +495,20 @@ export default function ChatsPage() {
             </p>
           </div>
         )}
+      </div>
+
+      <div className="fixed right-4 bottom-[88px] z-30 md:hidden">
+        <CreateMenu
+          trigger={
+            <button
+              type="button"
+              aria-label="New conversation"
+              className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 active:scale-95"
+            >
+              <Plus className="size-5" />
+            </button>
+          }
+        />
       </div>
 
       <NewChatDialog

@@ -17,6 +17,9 @@ import {
   UsersRound,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { Link } from "react-router";
+
+const POLICY_VERSION = "2026-11-22";
 
 const STEPS = ["Your details", "Your photo", "Contacts", "Finish"];
 
@@ -56,6 +59,7 @@ export default function Onboarding() {
   >("idle");
   const [contactCount, setContactCount] = useState<number | null>(null);
   const [contactsNote, setContactsNote] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState(false);
 
   const photoInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
@@ -166,6 +170,10 @@ export default function Onboarding() {
 
   async function finish() {
     if (!profile) return;
+    if (!accepted) {
+      setError("Accept the Terms, Privacy Policy and Community Guidelines to continue.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -183,17 +191,29 @@ export default function Onboarding() {
       }
 
       const testPhone = window.localStorage.getItem("pingo:test_phone");
-      const { error: updateError } = await supabase
+      const baseUpdate = {
+        display_name: name.trim(),
+        username,
+        about: about.trim(),
+        avatar_path: avatarPath,
+        phone: testPhone ?? profile.phone ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      let { error: updateError } = await supabase
         .from("profiles")
         .update({
-          display_name: name.trim(),
-          username,
-          about: about.trim(),
-          avatar_path: avatarPath,
-          phone: testPhone ?? profile.phone ?? null,
-          updated_at: new Date().toISOString(),
+          ...baseUpdate,
+          terms_version: POLICY_VERSION,
+          terms_accepted_at: new Date().toISOString(),
         })
         .eq("id", profile.id);
+      if (updateError && /terms_(version|accepted_at)/i.test(updateError.message)) {
+        // Migration 0004 not applied yet: do not block account setup.
+        ({ error: updateError } = await supabase
+          .from("profiles")
+          .update(baseUpdate)
+          .eq("id", profile.id));
+      }
       if (updateError) {
         if (updateError.code === "23505") {
           throw new Error("That username was just taken. Go back and choose another.");
@@ -509,6 +529,32 @@ export default function Onboarding() {
           </div>
         )}
 
+        {step === 3 && (
+          <label className="mt-5 flex cursor-pointer items-start gap-2.5 rounded-md bg-secondary/60 p-3">
+            <input
+              type="checkbox"
+              checked={accepted}
+              onChange={(event) => setAccepted(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-[var(--primary)]"
+            />
+            <span className="text-[0.7rem] leading-5 text-muted-foreground">
+              I have read and accept the{" "}
+              <Link to="/terms" target="_blank" className="font-medium text-primary underline">
+                Terms of Service
+              </Link>
+              ,{" "}
+              <Link to="/privacy" target="_blank" className="font-medium text-primary underline">
+                Privacy Policy
+              </Link>{" "}
+              and{" "}
+              <Link to="/guidelines" target="_blank" className="font-medium text-primary underline">
+                Community Guidelines
+              </Link>
+              .
+            </span>
+          </label>
+        )}
+
         {error && (
           <p className="mt-5 rounded-md bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
             {error}
@@ -534,7 +580,7 @@ export default function Onboarding() {
             <Button
               className="flex-1"
               onClick={() => void finish()}
-              disabled={saving}
+              disabled={saving || !accepted}
             >
               {saving ? (
                 <>

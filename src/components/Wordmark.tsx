@@ -57,7 +57,7 @@ export function Wordmark({
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <PingoMark className="size-8" />
       <span className="flex flex-col leading-none">
-        <span className="text-[1.35rem] font-extrabold tracking-[-0.04em]">
+        <span className="text-[1.3rem] font-semibold tracking-[-0.045em]">
           PINGO
         </span>
         {showTagline && (

@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 
 const BACKGROUNDS = [
   "#126B78",
@@ -107,6 +108,7 @@ export default function UpdatesPage() {
   const [viewed, setViewed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const navigate = useNavigate();
   const [viewerGroup, setViewerGroup] = useState<StatusGroup | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -255,7 +257,7 @@ export default function UpdatesPage() {
           size="sm"
           variant="outline"
           className="ml-auto gap-1.5"
-          onClick={() => setCreateOpen(true)}
+          onClick={() => navigate("/app/updates/create")}
         >
           <Plus className="size-4" /> Add status
         </Button>
@@ -280,7 +282,7 @@ export default function UpdatesPage() {
                   setViewerIndex(0);
                   void recordView(mine[0]);
                 } else {
-                  setCreateOpen(true);
+                  navigate("/app/updates/create");
                 }
               }}
               className="relative"
@@ -380,7 +382,7 @@ export default function UpdatesPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setCreateChannelOpen(true)}
+              onClick={() => navigate("/app/channels/create")}
               className="gap-1.5"
             >
               <Plus className="size-4" /> Create
@@ -409,10 +411,7 @@ export default function UpdatesPage() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      setChannelOpen(channel);
-                      setChannelError(null);
-                    }}
+                    onClick={() => navigate(`/app/channels/${channel.id}`)}
                     className="min-w-0 flex-1 text-left"
                   >
                     <p className="truncate text-sm font-bold">{channel.name}</p>

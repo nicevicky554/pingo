@@ -4,6 +4,12 @@ import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -12,17 +18,20 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
+  listConversations,
   listHiddenMessageIds,
   listMessages,
   listReactions,
   listReceipts,
   markConversationRead,
   sendMessage,
+  signedMediaUrl,
   uploadChatAttachment,
 } from "@/lib/chat";
 import { dayLabel, lastSeenLabel, timeOf } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 import { freshPrivateChannel } from "@/lib/realtime";
+import { Link } from "react-router";
 import type {
   ConversationMember,
   ConversationSummary,
@@ -83,6 +92,9 @@ export function ChatThread({
   >({});
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [forwarding, setForwarding] = useState<Message | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
+  const [forwardBusy, setForwardBusy] = useState<string | null>(null);
 
   const { online } = usePresence();
   const { startCall } = useCall();
@@ -90,6 +102,16 @@ export function ChatThread({
   const receiptsEnabled = settings?.read_receipts !== false;
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const messagesRef = useRef<Message[]>([]);
+  const pendingRef = useRef(
+    new Map<
+      string,
+      {
+        outgoing: OutgoingMessage;
+        onProgress: (percent: number) => void;
+        replyToId: string | null;
+      }
+    >(),
+  );
   const lastTypingSent = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -325,50 +347,176 @@ export function ChatThread({
     });
   }, [currentUserId, currentProfile.display_name]);
 
+  /** Deliver an already-visible optimistic message. */
+  async function deliver(tempId: string) {
+    const pending = pendingRef.current.get(tempId);
+    if (!pending) return;
+    const { outgoing, onProgress, replyToId } = pending;
+
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === tempId ? { ...message, status: "sending" } : message,
+      ),
+    );
+
+    try {
+      let attachmentPath: string | null = null;
+      if (outgoing.file) {
+        notifyActivity("uploading");
+        attachmentPath = await uploadChatAttachment(
+          conversation.id,
+          outgoing.file,
+          outgoing.fileName ?? "attachment",
+          onProgress,
+        );
+        notifyActivity("");
+      }
+
+      const sent = await sendMessage({
+        conversationId: conversation.id,
+        senderId: currentUserId,
+        body: outgoing.body,
+        kind: outgoing.kind,
+        attachmentPath,
+        attachmentName: outgoing.fileName ?? null,
+        attachmentSize: outgoing.file?.size ?? null,
+        attachmentMime: outgoing.file?.type ?? null,
+        durationSeconds: outgoing.durationSeconds ?? null,
+        waveform: outgoing.waveform ?? null,
+        replyToId,
+        disappearSeconds: conversation.disappear_seconds,
+      });
+
+      setMessages((current) => {
+        let replaced = false;
+        const next = current.flatMap((message) => {
+          if (message.id === tempId) {
+            replaced = true;
+            return [sent];
+          }
+          // Realtime may have inserted the server row before this resolves.
+          if (message.id === sent.id) return [];
+          return [message];
+        });
+        if (!replaced && !next.some((message) => message.id === sent.id)) {
+          next.push(sent);
+        }
+        messagesRef.current = next;
+        return next;
+      });
+      pendingRef.current.delete(tempId);
+      setReplyTo(null);
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "stop_typing",
+        payload: { user_id: currentUserId },
+      });
+      onChanged();
+    } catch (err) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === tempId ? { ...message, status: "failed" } : message,
+        ),
+      );
+      notifyActivity("");
+      throw err;
+    }
+  }
+
   async function handleSend(
     outgoing: OutgoingMessage,
     onProgress: (percent: number) => void,
   ) {
-    let attachmentPath: string | null = null;
-    if (outgoing.file) {
-      notifyActivity("uploading");
-      attachmentPath = await uploadChatAttachment(
-        conversation.id,
-        outgoing.file,
-        outgoing.fileName ?? "attachment",
-        onProgress,
-      );
-      notifyActivity("");
-    }
-
-    const sent = await sendMessage({
-      conversationId: conversation.id,
-      senderId: currentUserId,
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const localUrl = outgoing.file
+      ? URL.createObjectURL(outgoing.file)
+      : undefined;
+    const now = new Date().toISOString();
+    const temp: Message = {
+      id: tempId,
+      conversation_id: conversation.id,
+      sender_id: currentUserId,
       body: outgoing.body,
-      kind: outgoing.kind,
-      attachmentPath,
-      attachmentName: outgoing.fileName ?? null,
-      attachmentSize: outgoing.file?.size ?? null,
-      attachmentMime: outgoing.file?.type ?? null,
-      durationSeconds: outgoing.durationSeconds ?? null,
+      kind: outgoing.kind ?? "text",
+      attachment_path: null,
+      attachment_name: outgoing.fileName ?? null,
+      attachment_size: outgoing.file?.size ?? null,
+      attachment_mime: outgoing.file?.type ?? null,
+      duration_seconds: outgoing.durationSeconds ?? null,
       waveform: outgoing.waveform ?? null,
-      replyToId: replyTo?.id ?? null,
-      disappearSeconds: conversation.disappear_seconds,
-    });
+      reply_to_id: replyTo?.id ?? null,
+      edited_at: null,
+      deleted_at: null,
+      created_at: now,
+      expires_at: null,
+      status: "sending",
+      local_url: localUrl,
+    };
 
-    setMessages((current) =>
-      current.some((message) => message.id === sent.id)
-        ? current
-        : [...current, sent],
-    );
-    messagesRef.current = [...messagesRef.current, sent];
-    setReplyTo(null);
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "stop_typing",
-      payload: { user_id: currentUserId },
+    pendingRef.current.set(tempId, {
+      outgoing,
+      onProgress,
+      replyToId: replyTo?.id ?? null,
     });
-    onChanged();
+    setMessages((current) => {
+      const next = [...current, temp];
+      messagesRef.current = next;
+      return next;
+    });
+    if (!outgoing.file) {
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "stop_typing",
+        payload: { user_id: currentUserId },
+      });
+    }
+    await deliver(tempId);
+  }
+
+  async function openForward(message: Message) {
+    setForwarding(message);
+    try {
+      const list = await listConversations(currentUserId);
+      setForwardTargets(list.filter((item) => item.id !== conversation.id));
+    } catch {
+      setForwardTargets([]);
+    }
+  }
+
+  async function forwardTo(target: ConversationSummary) {
+    if (!forwarding || forwardBusy) return;
+    setForwardBusy(target.id);
+    try {
+      let attachmentPath: string | null = null;
+      if (forwarding.attachment_path) {
+        const url = await signedMediaUrl(forwarding.attachment_path);
+        if (!url) throw new Error("The attachment could not be read.");
+        const blob = await (await fetch(url)).blob();
+        attachmentPath = await uploadChatAttachment(
+          target.id,
+          blob,
+          forwarding.attachment_name ?? "forwarded",
+        );
+      }
+      await sendMessage({
+        conversationId: target.id,
+        senderId: currentUserId,
+        body: forwarding.body,
+        kind: forwarding.kind,
+        attachmentPath,
+        attachmentName: forwarding.attachment_name,
+        attachmentSize: forwarding.attachment_size,
+        attachmentMime: forwarding.attachment_mime,
+        durationSeconds: forwarding.duration_seconds,
+        waveform: forwarding.waveform,
+      });
+      setForwarding(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not forward the message.");
+      setForwarding(null);
+    } finally {
+      setForwardBusy(null);
+    }
   }
 
   async function toggleReaction(message: Message, emoji: string) {
@@ -525,10 +673,30 @@ export function ChatThread({
           <ArrowLeft className="size-5" />
         </Button>
 
-        <UserAvatar profile={avatarProfile} size="md" showPresence={!isGroup} />
+        {(isGroup || peer) ? (
+          <Link
+            to={isGroup ? `/app/groups/${conversation.id}` : `/app/profile/${peer!.id}`}
+            aria-label={isGroup ? "Open group info" : `Open ${title}'s profile`}
+          >
+            <UserAvatar profile={avatarProfile} size="md" showPresence={!isGroup} />
+          </Link>
+        ) : (
+          <UserAvatar profile={avatarProfile} size="md" showPresence={false} />
+        )}
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[0.9rem] font-semibold">{title}</p>
+          <p className="truncate text-[0.9rem] font-semibold">
+            {isGroup || peer ? (
+              <Link
+                to={isGroup ? `/app/groups/${conversation.id}` : `/app/profile/${peer!.id}`}
+                className="hover:underline"
+              >
+                {title}
+              </Link>
+            ) : (
+              title
+            )}
+          </p>
           <p className="truncate text-[0.7rem] text-muted-foreground">
             {activityLabel ? (
               <span className="font-medium text-primary">{activityLabel}</span>
@@ -747,6 +915,12 @@ export function ChatThread({
                       currentUserId={currentUserId}
                       canModerate={canModerate}
                       onReply={() => setReplyTo(message)}
+                      onRetry={
+                        message.status === "failed"
+                          ? () => void deliver(message.id).catch(() => undefined)
+                          : undefined
+                      }
+                      onForward={() => void openForward(message)}
                       onReact={(emoji) => void toggleReaction(message, emoji)}
                       onEdit={(body) => editMessage(message, body)}
                       onDeleteForMe={() => void deleteForMe(message)}
@@ -790,6 +964,51 @@ export function ChatThread({
         }
         disabledReason="Only group admins can post in this group."
       />
+
+      <Dialog
+        open={Boolean(forwarding)}
+        onOpenChange={(open) => {
+          if (!open) setForwarding(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Forward message</DialogTitle>
+          </DialogHeader>
+          <div className="thin-scrollbar max-h-80 overflow-y-auto">
+            {forwardTargets.length === 0 ? (
+              <p className="py-8 text-center text-xs text-muted-foreground">
+                No other conversations available.
+              </p>
+            ) : (
+              forwardTargets.map((target) => (
+                <button
+                  key={target.id}
+                  type="button"
+                  disabled={Boolean(forwardBusy)}
+                  onClick={() => void forwardTo(target)}
+                  className="flex w-full items-center gap-3 rounded-md px-2 py-2.5 text-left hover:bg-secondary disabled:opacity-60"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-primary">
+                    {(target.title ?? "C").slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {target.title || "Direct conversation"}
+                    </span>
+                    <span className="block truncate text-[0.65rem] text-muted-foreground">
+                      {target.type === "group" ? "Group" : "Direct message"}
+                    </span>
+                  </span>
+                  {forwardBusy === target.id && (
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

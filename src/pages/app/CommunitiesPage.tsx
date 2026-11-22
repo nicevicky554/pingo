@@ -20,6 +20,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 
 type CommunityRow = Community & { member_count: number; is_member: boolean };
 
@@ -28,6 +29,7 @@ export default function CommunitiesPage() {
   const [communities, setCommunities] = useState<CommunityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const navigate = useNavigate();
   const [active, setActive] = useState<CommunityRow | null>(null);
 
   const load = useCallback(async () => {
@@ -92,7 +94,11 @@ export default function CommunitiesPage() {
             Groups that belong together
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+        <Button
+          size="sm"
+          className="gap-1.5"
+          onClick={() => navigate("/app/communities/create")}
+        >
           <Plus className="size-4" /> New
         </Button>
       </header>
@@ -112,7 +118,11 @@ export default function CommunitiesPage() {
               Communities gather related groups under one name and one set of
               administrators.
             </p>
-            <Button className="mt-4" size="sm" onClick={() => setCreateOpen(true)}>
+            <Button
+              className="mt-4"
+              size="sm"
+              onClick={() => navigate("/app/communities/create")}
+            >
               Create a community
             </Button>
           </div>

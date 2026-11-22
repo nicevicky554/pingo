@@ -24,6 +24,7 @@ import {
   Download,
   FileText,
   Flag,
+  Forward,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -43,14 +44,14 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🙏", "👀"];
 type ReceiptState = "sent" | "delivered" | "read";
 
 function Attachment({ message }: { message: Message }) {
-  const [url, setUrl] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(message.local_url ?? null);
   const [failed, setFailed] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerZoom, setViewerZoom] = useState(1);
 
   useEffect(() => {
     let active = true;
-    if (!message.attachment_path) return;
+    if (!message.attachment_path || message.local_url) return;
     signedMediaUrl(message.attachment_path).then((next) => {
       if (!active) return;
       if (next) setUrl(next);
@@ -59,9 +60,9 @@ function Attachment({ message }: { message: Message }) {
     return () => {
       active = false;
     };
-  }, [message.attachment_path]);
+  }, [message.attachment_path, message.local_url]);
 
-  if (!message.attachment_path) return null;
+  if (!message.attachment_path && !message.local_url) return null;
 
   if (message.kind === "image") {
     return (
@@ -330,6 +331,8 @@ export function MessageBubble({
   onReport,
   onCopy,
   onBlock,
+  onRetry,
+  onForward,
   showAvatar,
 }: {
   message: Message;
@@ -350,6 +353,8 @@ export function MessageBubble({
   onReport: () => void;
   onCopy: () => void;
   onBlock?: () => void;
+  onRetry?: () => void;
+  onForward?: () => void;
   showAvatar: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -464,7 +469,21 @@ export function MessageBubble({
           >
             {message.edited_at && <span>edited</span>}
             <span>{timeOf(message.created_at)}</span>
+            {isOwn && message.status === "sending" && <span>Sending…</span>}
+            {isOwn && message.status === "failed" && onRetry && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRetry();
+                }}
+                className="font-semibold text-destructive underline underline-offset-2"
+              >
+                Failed · Retry
+              </button>
+            )}
             {isOwn &&
+              !message.status &&
               (receipt === "read" ? (
                 <CheckCheck className="size-3.5 text-primary" aria-label="Read" />
               ) : receipt === "delivered" ? (
@@ -573,6 +592,11 @@ export function MessageBubble({
               <DropdownMenuItem onSelect={onReply}>
                 <Reply className="size-4" /> Reply
               </DropdownMenuItem>
+              {onForward && (
+                <DropdownMenuItem onSelect={onForward}>
+                  <Forward className="size-4" /> Forward
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={onDeleteForMe}>
                 <Trash2 className="size-4" /> Delete for me

@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import AuthPage from "@/pages/Auth";
 import Onboarding from "@/pages/Onboarding";
-import { Loader2 } from "lucide-react";
+import { BrandSplash } from "@/components/BrandSplash";
 import { Navigate, useSearchParams } from "react-router";
 
 /**
@@ -24,14 +24,7 @@ export default function Home() {
   if (!isSupabaseConfigured) return <SetupNotice />;
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-background">
-        <Loader2 className="size-5 animate-spin text-primary" />
-        <p className="text-xs font-medium text-muted-foreground">
-          Restoring your session…
-        </p>
-      </div>
-    );
+    return <BrandSplash />;
   }
 
   if (!isAuthenticated) return <AuthPage />;

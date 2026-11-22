@@ -22,6 +22,7 @@ Convex dependency.
    - `supabase/migrations/0001_pingo_core.sql`
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
    - `supabase/migrations/0003_media_waveforms.sql`
+   - `supabase/migrations/0004_terms_acceptance.sql`
 
 4. **Authentication → Providers**
    - **Test mode (default):** enable **Anonymous sign-ins**.

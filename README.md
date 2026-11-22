@@ -25,6 +25,7 @@ page.
    - `supabase/migrations/0001_pingo_core.sql`
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
    - `supabase/migrations/0003_media_waveforms.sql`
+   - `supabase/migrations/0004_terms_acceptance.sql`
 
    With the Supabase CLI:
 
@@ -65,7 +66,10 @@ setup, and [`env.example`](./env.example) for the full list.
   security-definer RPC with an audit entry; the client reads the mode from the
   database before showing the code step.
 - Onboarding: unique `@username` check against the database, display name,
-  optional profile photo upload.
+  optional profile photo upload, cropping, contact picker and an explicit
+  agreement step that records the accepted policy version and timestamp.
+- Branded startup splash while the session/profile is restored; no marketing
+  page at `/`. Legal pages live at `/terms`, `/privacy` and `/guidelines`.
 - Full responsive shell: 76px desktop rail, 350px conversation list, mobile
   bottom navigation, safe-area padding, offline banner, light/dark/system theme,
   font-size and wallpaper preferences persisted in `user_settings`.
@@ -137,6 +141,35 @@ setup, and [`env.example`](./env.example) for the full list.
   and audit records.
 - Administrator roster and role grants (super admin only), immutable audit log
   (no update policy exists for audit rows).
+
+### Redesigned navigation and dedicated creation routes
+
+- `/app/new/message` — people discovery, contact list and duplicate-safe direct
+  conversation creation.
+- `/app/search` — people, message and public channel search in one page.
+- `/app/profile/:userId` — full profile information with message, voice/video
+  call, add contact, block and report actions.
+- `/app/groups/create` — multi-step member selection, details, permissions and
+  review; creates the group and opens it. `/app/groups/:id` is real group info
+  with member list, add members, mute, leave and editable details.
+- `/app/channels/create` and `/app/channels/:id` — real channel creation, follow
+  state, subscriber count and post feed. Owners publish from
+  `/app/channels/:id/compose` with a preview; scheduled posts are not offered.
+- `/app/updates/create` — full-page status editor for text, photo and video.
+- `/app/communities/create` — dedicated community creation page.
+- The mobile Chats plus button opens New message / New group / New channel /
+  New community and every entry navigates to its own page, not a modal.
+
+### Message sending
+
+- Optimistic UI: the message appears immediately with a sending state, then is
+  replaced by the server row (realtime insert duplication is de-duplicated).
+- Failures stay visible with **Failed · Retry**; successful sends clear the
+  composer immediately. Repeated taps are blocked with a synchronous guard.
+- `waveform` is only sent when present and retried without it if migration 0003
+  has not been applied, so text messages never fail because of the voice column.
+- Inline replies, reactions, forwarding (including media re-upload), editing,
+  delete-for-me and delete-for-everyone are wired to Supabase.
 
 ## 3. Database architecture
 
@@ -247,10 +280,13 @@ src/
   pages/            Home, Auth, Onboarding, 404
     app/            Chats, Updates, Communities, Calls, Settings
     admin/          Dashboard, Users, Reports, Access, Setup
+  pages/app/         Chats, Search, NewMessage, Profile, GroupInfo, Groups/Create,
+                     Channels, CreateChannel, ChannelCompose, Updates, StatusComposer,
+                     Communities, CreateCommunity, Calls, Settings
   providers/        AuthProvider, PresenceProvider, CallProvider, NotificationsProvider
 api/
   turn.ts           verified, short-lived TURN credentials
 supabase/
   migrations/       0001_pingo_core.sql, 0002_test_auth_calls_notifications.sql,
-                    0003_media_waveforms.sql
+                    0003_media_waveforms.sql, 0004_terms_acceptance.sql
 ```

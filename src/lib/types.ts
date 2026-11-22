@@ -61,6 +61,10 @@ export type Message = {
   deleted_at: string | null;
   created_at: string;
   expires_at: string | null;
+  /** Client-only optimistic state; never written to Postgres. */
+  status?: "sending" | "failed";
+  /** Client-only local object URL for an attachment still uploading. */
+  local_url?: string;
 };
 
 export type ConversationSummary = {

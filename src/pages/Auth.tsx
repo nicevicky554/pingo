@@ -32,7 +32,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 function resolveRedirect(returnTo: string | null) {
   if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) return returnTo;
@@ -274,8 +274,19 @@ export default function AuthPage() {
             </Button>
 
             <p className="mt-6 text-center text-[0.68rem] leading-5 text-muted-foreground">
-              By continuing you agree to use PINGO respectfully. Your number is
-              stored with your Supabase account.
+              By continuing you agree to the{" "}
+              <Link to="/terms" target="_blank" className="underline underline-offset-2 hover:text-foreground">
+                Terms
+              </Link>
+              ,{" "}
+              <Link to="/privacy" target="_blank" className="underline underline-offset-2 hover:text-foreground">
+                Privacy Policy
+              </Link>{" "}
+              and{" "}
+              <Link to="/guidelines" target="_blank" className="underline underline-offset-2 hover:text-foreground">
+                Community Guidelines
+              </Link>
+              .
             </p>
           </form>
         ) : (

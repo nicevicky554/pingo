@@ -99,6 +99,7 @@ export function AppShell({
   className?: string;
 }) {
   const online = useConnectionStatus();
+  const { profile } = useAuth();
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -161,13 +162,13 @@ export function AppShell({
             No connection. Messages will send when you're back online.
           </div>
         )}
-        <div className={cn("flex min-h-0 flex-1 flex-col pb-[57px] md:pb-0", className)}>
+        <div className={cn("flex min-h-0 flex-1 flex-col pb-[76px] md:pb-0", className)}>
           {children}
         </div>
       </div>
 
       <nav
-        className="safe-bottom fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-border bg-card md:hidden"
+        className="glass safe-bottom fixed inset-x-3 bottom-2 z-40 flex items-stretch justify-around rounded-2xl px-1 py-1 md:hidden"
         aria-label="Primary"
       >
         {NAV.map((item) => {
@@ -178,27 +179,27 @@ export function AppShell({
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "flex min-w-0 flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[0.6rem] font-medium transition-colors",
-                  isActive ? "text-primary" : "text-muted-foreground",
+                  "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl py-1.5 text-[0.58rem] font-medium transition-colors",
+                  isActive
+                    ? "bg-accent text-primary"
+                    : "text-muted-foreground active:bg-secondary",
                 )
               }
             >
-              <Icon className="size-[22px]" strokeWidth={1.9} aria-hidden="true" />
+              <Icon className="size-[21px]" strokeWidth={1.9} aria-hidden="true" />
               <span>{item.label}</span>
             </NavLink>
           );
         })}
         <NavLink
-          to="/app/settings"
-          className={({ isActive }) =>
-            cn(
-              "flex min-w-0 flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[0.6rem] font-medium transition-colors",
-              isActive ? "text-primary" : "text-muted-foreground",
-            )
-          }
+          to={profile ? `/app/profile/${profile.id}` : "/app/settings"}
+          aria-label="Your profile"
+          className="flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl py-1 text-[0.58rem] font-medium text-muted-foreground"
         >
-          <Settings className="size-[22px]" strokeWidth={1.9} aria-hidden="true" />
-          <span>Settings</span>
+          <span className="flex size-[27px] items-center justify-center">
+            <UserAvatar profile={profile} size="xs" />
+          </span>
+          <span>Profile</span>
         </NavLink>
       </nav>
     </div>

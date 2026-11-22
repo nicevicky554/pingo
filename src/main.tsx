@@ -1,6 +1,7 @@
 import "@vly-ai/integrations";
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
+import { BrandSplash } from "@/components/BrandSplash";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { CallProvider } from "@/providers/CallProvider";
@@ -26,6 +27,25 @@ const UpdatesPage = lazy(() => import("./pages/app/UpdatesPage.tsx"));
 const CommunitiesPage = lazy(() => import("./pages/app/CommunitiesPage.tsx"));
 const CallsPage = lazy(() => import("./pages/app/CallsPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/app/SettingsPage.tsx"));
+const NewMessagePage = lazy(() => import("./pages/app/NewMessagePage.tsx"));
+const SearchPage = lazy(() => import("./pages/app/SearchPage.tsx"));
+const ProfilePage = lazy(() => import("./pages/app/ProfilePage.tsx"));
+const CreateGroupPage = lazy(() => import("./pages/app/CreateGroupPage.tsx"));
+const GroupInfoPage = lazy(() => import("./pages/app/GroupInfoPage.tsx"));
+const CreateChannelPage = lazy(() => import("./pages/app/CreateChannelPage.tsx"));
+const ChannelPage = lazy(() => import("./pages/app/ChannelPage.tsx"));
+const ChannelComposePage = lazy(
+  () => import("./pages/app/ChannelComposePage.tsx"),
+);
+const CreateCommunityPage = lazy(
+  () => import("./pages/app/CreateCommunityPage.tsx"),
+);
+const StatusComposerPage = lazy(
+  () => import("./pages/app/StatusComposerPage.tsx"),
+);
+const LegalPage = lazy(() =>
+  import("./pages/Legal").then((module) => ({ default: module.LegalPage })),
+);
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 const AdminSetup = lazy(() => import("./pages/admin/AdminSetup.tsx"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
@@ -51,13 +71,7 @@ const AdminShell = lazy(() =>
 );
 
 function RouteLoading() {
-  return (
-    <div className="dot-grid flex min-h-screen items-center justify-center bg-background">
-      <div className="animate-pulse text-sm font-semibold text-muted-foreground">
-        Opening PINGO…
-      </div>
-    </div>
-  );
+  return <BrandSplash label="Opening PINGO" />;
 }
 
 class ToolbarErrorBoundary extends React.Component<
@@ -144,6 +158,34 @@ function AppProviders() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route path="/terms" element={<LegalPage doc="terms" />} />
+          <Route path="/privacy" element={<LegalPage doc="privacy" />} />
+          <Route path="/guidelines" element={<LegalPage doc="guidelines" />} />
+          <Route path="/chats" element={<Navigate to="/app/chats" replace />} />
+          <Route path="/updates" element={<Navigate to="/app/updates" replace />} />
+          <Route
+            path="/communities"
+            element={<Navigate to="/app/communities" replace />}
+          />
+          <Route path="/calls" element={<Navigate to="/app/calls" replace />} />
+          <Route path="/settings" element={<Navigate to="/app/settings" replace />} />
+          <Route
+            path="/new/message"
+            element={<Navigate to="/app/new/message" replace />}
+          />
+          <Route path="/search" element={<Navigate to="/app/search" replace />} />
+          <Route
+            path="/groups/create"
+            element={<Navigate to="/app/groups/create" replace />}
+          />
+          <Route
+            path="/channels/create"
+            element={<Navigate to="/app/channels/create" replace />}
+          />
+          <Route
+            path="/updates/create"
+            element={<Navigate to="/app/updates/create" replace />}
+          />
 
           <Route
             path="/app"
@@ -159,8 +201,21 @@ function AppProviders() {
           >
             <Route index element={<Navigate to="/app/chats" replace />} />
             <Route path="chats" element={<ChatsPage />} />
+            <Route path="new/message" element={<NewMessagePage />} />
+            <Route path="search" element={<SearchPage />} />
+            <Route path="profile/:userId" element={<ProfilePage />} />
+            <Route path="groups/create" element={<CreateGroupPage />} />
+            <Route path="groups/:conversationId" element={<GroupInfoPage />} />
+            <Route path="channels/create" element={<CreateChannelPage />} />
+            <Route path="channels/:channelId" element={<ChannelPage />} />
+            <Route
+              path="channels/:channelId/compose"
+              element={<ChannelComposePage />}
+            />
             <Route path="updates" element={<UpdatesPage />} />
+            <Route path="updates/create" element={<StatusComposerPage />} />
             <Route path="communities" element={<CommunitiesPage />} />
+            <Route path="communities/create" element={<CreateCommunityPage />} />
             <Route path="calls" element={<CallsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

@@ -108,25 +108,35 @@ export async function sendMessage(input: {
   const expiresAt = input.disappearSeconds
     ? new Date(Date.now() + input.disappearSeconds * 1000).toISOString()
     : null;
-  const { data, error } = await supabase
-    .from("messages")
-    .insert({
-      conversation_id: input.conversationId,
-      sender_id: input.senderId,
-      body: input.body,
-      kind: input.kind ?? "text",
-      attachment_path: input.attachmentPath ?? null,
-      attachment_name: input.attachmentName ?? null,
-      attachment_size: input.attachmentSize ?? null,
-      attachment_mime: input.attachmentMime ?? null,
-      duration_seconds: input.durationSeconds ?? null,
-      waveform: input.waveform ?? null,
-      reply_to_id: input.replyToId ?? null,
-      expires_at: expiresAt,
-    })
-    .select("*")
-    .single<Message>();
+  const payload: Record<string, unknown> = {
+    conversation_id: input.conversationId,
+    sender_id: input.senderId,
+    body: input.body,
+    kind: input.kind ?? "text",
+    attachment_path: input.attachmentPath ?? null,
+    attachment_name: input.attachmentName ?? null,
+    attachment_size: input.attachmentSize ?? null,
+    attachment_mime: input.attachmentMime ?? null,
+    duration_seconds: input.durationSeconds ?? null,
+    reply_to_id: input.replyToId ?? null,
+    expires_at: expiresAt,
+  };
+  if (input.waveform && input.waveform.length > 0) {
+    payload.waveform = input.waveform;
+  }
+
+  const insert = () =>
+    supabase.from("messages").insert(payload).select("*").single<Message>();
+
+  let { data, error } = await insert();
+  // Older deployments may not have migration 0003 yet; text messages must
+  // still send, and voice notes degrade to a plain audio attachment.
+  if (error && /waveform/i.test(error.message)) {
+    delete payload.waveform;
+    ({ data, error } = await insert());
+  }
   if (error) throw error;
+  if (!data) throw new Error("The message was not saved. Try again.");
   return data;
 }
 
