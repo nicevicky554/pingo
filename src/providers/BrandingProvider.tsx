@@ -20,6 +20,12 @@ export type BrandingAssets = {
   default_group_url?: string;
   default_channel_url?: string;
   default_community_url?: string;
+  nav_chats_url?: string;
+  nav_updates_url?: string;
+  nav_communities_url?: string;
+  nav_calls_url?: string;
+  nav_settings_url?: string;
+  verified_badge_url?: string;
 };
 
 type BrandingContextValue = {

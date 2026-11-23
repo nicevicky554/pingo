@@ -92,10 +92,38 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             Notification.permission === "granted" &&
             document.visibilityState !== "visible"
           ) {
-            new Notification(incoming.title, {
+            const options = {
               body: incoming.body ?? undefined,
               tag: incoming.id,
-            });
+              icon: "/logo192.png",
+              badge: "/logo192.png",
+              data: { url: "/app/chats" },
+            };
+            // A service-worker notification is reliable on mobile browsers,
+            // where the Notification constructor is often unavailable.
+            if ("serviceWorker" in navigator) {
+              void navigator.serviceWorker
+                .getRegistration()
+                .then((registration) => {
+                  if (registration) {
+                    return registration.showNotification(incoming.title, options);
+                  }
+                  new Notification(incoming.title, options);
+                })
+                .catch(() => {
+                  try {
+                    new Notification(incoming.title, options);
+                  } catch {
+                    // Notification output is optional.
+                  }
+                });
+            } else {
+              try {
+                new Notification(incoming.title, options);
+              } catch {
+                // Notification output is optional.
+              }
+            }
           }
         },
       )

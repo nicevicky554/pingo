@@ -92,6 +92,62 @@ export function ChatsSettingsPage() {
         <section className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center justify-between gap-4">
             <div>
+              <h2 className="text-sm font-semibold">Auto-download media</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                When off, photos and videos wait for a Download action. This
+                reduces data use on slow connections.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings?.auto_download_media !== false}
+              onClick={() =>
+                void update({
+                  auto_download_media: settings?.auto_download_media === false,
+                })
+              }
+              className={cn(
+                "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+                settings?.auto_download_media !== false ? "bg-primary" : "bg-muted",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-1 size-5 rounded-full bg-white shadow-sm transition-all",
+                  settings?.auto_download_media !== false ? "left-6" : "left-1",
+                )}
+              />
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold">Media quality</h2>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Choice
+              active={(settings?.media_quality ?? "standard") === "standard"}
+              onClick={() => void update({ media_quality: "standard" })}
+            >
+              Standard
+            </Choice>
+            <Choice
+              active={settings?.media_quality === "high"}
+              onClick={() => void update({ media_quality: "high" })}
+            >
+              High
+            </Choice>
+          </div>
+          <p className="mt-2 text-[0.68rem] leading-5 text-muted-foreground">
+            High quality keeps the original file. Standard asks compatible
+            uploads to use a smaller version; it never labels a low-quality file
+            as HD.
+          </p>
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
               <h2 className="text-sm font-semibold">Message previews</h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
                 Show message text in notifications and the chat list.
@@ -135,6 +191,8 @@ export function DevicesSettingsPage() {
     { id: string; name: string | null; platform: string | null; last_seen_at: string }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [revoking, setRevoking] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -195,6 +253,39 @@ export function DevicesSettingsPage() {
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold">Other sessions</h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Revokes refresh tokens for every other browser or device. This
+            session stays signed in.
+          </p>
+          <Button
+            variant="outline"
+            className="mt-3"
+            disabled={revoking}
+            onClick={async () => {
+              setRevoking(true);
+              const { error } = await supabase.auth.signOut({ scope: "others" });
+              setRevoking(false);
+              setNotice(
+                error
+                  ? error.message
+                  : "Other sessions were revoked. This device is still signed in.",
+              );
+            }}
+          >
+            {revoking ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="size-4" />
+            )}
+            Log out other devices
+          </Button>
+          {notice && (
+            <p className="mt-2 text-xs font-medium text-muted-foreground">{notice}</p>
           )}
         </section>
 

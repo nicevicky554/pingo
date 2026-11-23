@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { signedMediaUrl } from "@/lib/chat";
+import { supabase } from "@/lib/supabase";
 import { bytesLabel, durationLabel, timeOf } from "@/lib/format";
 import type { Message, Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import { useEffect, useRef, useState } from "react";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🙏", "👀"];
@@ -44,14 +46,25 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🙏", "👀"];
 type ReceiptState = "sent" | "delivered" | "read";
 
 function Attachment({ message }: { message: Message }) {
+  const { settings, profile } = useAuth();
   const [url, setUrl] = useState<string | null>(message.local_url ?? null);
   const [failed, setFailed] = useState(false);
+  const [requested, setRequested] = useState(false);
+  const [openWhenReady, setOpenWhenReady] = useState(false);
+  const [consumed, setConsumed] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerZoom, setViewerZoom] = useState(1);
+  const isViewOnce = message.view_once === true;
+  const isMine = message.sender_id === profile?.id;
+  const shouldLoad = isViewOnce
+    ? isMine || requested || Boolean(message.local_url)
+    : settings?.auto_download_media !== false ||
+      requested ||
+      Boolean(message.local_url);
 
   useEffect(() => {
     let active = true;
-    if (!message.attachment_path || message.local_url) return;
+    if (!message.attachment_path || message.local_url || !shouldLoad) return;
     signedMediaUrl(message.attachment_path).then((next) => {
       if (!active) return;
       if (next) setUrl(next);
@@ -60,7 +73,58 @@ function Attachment({ message }: { message: Message }) {
     return () => {
       active = false;
     };
-  }, [message.attachment_path, message.local_url]);
+  }, [message.attachment_path, message.local_url, shouldLoad]);
+
+  useEffect(() => {
+    if (openWhenReady && url) {
+      setOpenWhenReady(false);
+      setViewerOpen(true);
+    }
+  }, [openWhenReady, url]);
+
+  async function consumeViewOnce() {
+    if (!isViewOnce || isMine || consumed) return;
+    setConsumed(true);
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    await fetch("/api/messages/view-once", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ message_id: message.id }),
+    }).catch(() => undefined);
+  }
+
+  if (isViewOnce && !message.attachment_path && !message.local_url) {
+    return (
+      <div className="mb-1.5 flex h-24 w-56 flex-col items-center justify-center gap-1 rounded-md bg-muted text-xs text-muted-foreground">
+        <span>View-once media opened</span>
+        <span className="text-[0.6rem] opacity-70">It is no longer available.</span>
+      </div>
+    );
+  }
+
+  if (isViewOnce && !isMine && !requested && !consumed) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setRequested(true);
+          if (message.kind === "image") setOpenWhenReady(true);
+        }}
+        className="mb-1.5 flex h-28 w-56 flex-col items-center justify-center gap-1.5 rounded-md border border-current/15 bg-black/[0.03] text-xs dark:bg-white/[0.04]"
+      >
+        <span className="text-base">1×</span>
+        <span className="font-medium">Open once</span>
+        <span className="text-[0.6rem] opacity-60">
+          {message.kind === "video" ? "View-once video" : "View-once photo"}
+        </span>
+      </button>
+    );
+  }
 
   if (!message.attachment_path && !message.local_url) return null;
 
@@ -76,6 +140,18 @@ function Attachment({ message }: { message: Message }) {
               loading="lazy"
             />
           </button>
+        ) : !shouldLoad && !failed ? (
+          <button
+            type="button"
+            onClick={() => setRequested(true)}
+            className="flex h-32 w-56 flex-col items-center justify-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <Download className="size-4" />
+            <span>Download photo</span>
+            {message.attachment_size ? (
+              <span className="text-[0.6rem]">{bytesLabel(message.attachment_size)}</span>
+            ) : null}
+          </button>
         ) : (
           <div className="flex h-32 w-56 items-center justify-center text-xs text-muted-foreground">
             {failed ? "Photo unavailable" : "Loading photo…"}
@@ -85,7 +161,10 @@ function Attachment({ message }: { message: Message }) {
           open={viewerOpen}
           onOpenChange={(open) => {
             setViewerOpen(open);
-            if (!open) setViewerZoom(1);
+            if (!open) {
+              setViewerZoom(1);
+              if (isViewOnce) void consumeViewOnce();
+            }
           }}
         >
           <DialogContent
@@ -152,8 +231,23 @@ function Attachment({ message }: { message: Message }) {
         controls
         playsInline
         preload="metadata"
+        onEnded={() => {
+          if (isViewOnce) void consumeViewOnce();
+        }}
         className="mb-1.5 max-h-72 w-full max-w-[280px] rounded-md bg-black"
       />
+    ) : !shouldLoad && !failed ? (
+      <button
+        type="button"
+        onClick={() => setRequested(true)}
+        className="mb-1.5 flex h-32 w-56 flex-col items-center justify-center gap-1.5 rounded-md bg-muted text-xs text-muted-foreground"
+      >
+        <Download className="size-4" />
+        <span>Download video</span>
+        {message.attachment_size ? (
+          <span className="text-[0.6rem]">{bytesLabel(message.attachment_size)}</span>
+        ) : null}
+      </button>
     ) : (
       <div className="mb-1.5 flex h-32 w-56 items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
         {failed ? "Video unavailable" : "Loading video…"}

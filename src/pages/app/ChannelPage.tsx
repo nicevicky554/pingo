@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/app/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useBranding } from "@/providers/BrandingProvider";
@@ -165,7 +166,10 @@ export default function ChannelPage() {
               <Hash className="size-9" />
             )}
           </span>
-          <h2 className="mt-4 text-xl font-semibold tracking-[-0.02em]">{channel.name}</h2>
+          <h2 className="mt-4 flex items-center justify-center gap-1.5 text-xl font-semibold tracking-[-0.02em]">
+            {channel.name}
+            <VerifiedBadge verified={channel.is_verified} label="Verified channel" />
+          </h2>
           <p className="text-sm text-muted-foreground">@{channel.username}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {subscribers.toLocaleString()} subscriber{subscribers === 1 ? "" : "s"} ·{" "}

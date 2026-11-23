@@ -19,6 +19,7 @@ export type Profile = {
   online_visibility?: Visibility;
   last_seen_visibility?: Visibility;
   reachable?: boolean;
+  is_verified?: boolean;
 };
 
 export type UserSettings = {
@@ -29,6 +30,8 @@ export type UserSettings = {
   font_size: "sm" | "md" | "lg";
   message_preview: boolean;
   read_receipts: boolean;
+  auto_download_media?: boolean;
+  media_quality?: "standard" | "high";
   online_visibility: Visibility;
   last_seen_visibility: Visibility;
   avatar_visibility: Visibility;
@@ -61,6 +64,7 @@ export type Message = {
   deleted_at: string | null;
   created_at: string;
   expires_at: string | null;
+  view_once?: boolean;
   /** Client-only optimistic state; never written to Postgres. */
   status?: "sending" | "failed";
   /** Client-only local object URL for an attachment still uploading. */
@@ -108,6 +112,7 @@ export type StatusUpdate = {
   media_path: string | null;
   background: string | null;
   caption: string | null;
+  rotation?: number;
   created_at: string;
   expires_at: string;
   profile?: Profile | null;
@@ -122,6 +127,7 @@ export type Channel = {
   avatar_url: string | null;
   is_public: boolean;
   created_at: string;
+  is_verified?: boolean;
 };
 
 export type Community = {

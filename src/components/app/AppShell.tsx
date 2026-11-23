@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { useStatusRings } from "@/hooks/use-status-rings";
+import { useBranding } from "@/providers/BrandingProvider";
 import { cn } from "@/lib/utils";
 import {
   LogOut,
@@ -27,12 +28,17 @@ import { watchChannel } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
 
 const NAV = [
-  { to: "/app/chats", label: "Chats", icon: MessageSquare },
-  { to: "/app/updates", label: "Updates", icon: Radio },
-  { to: "/app/communities", label: "Communities", icon: UsersRound },
-  { to: "/app/calls", label: "Calls", icon: Phone },
-  { to: "/app/settings", label: "Settings", icon: Settings },
-];
+  { to: "/app/chats", label: "Chats", icon: MessageSquare, asset: "nav_chats_url" },
+  { to: "/app/updates", label: "Updates", icon: Radio, asset: "nav_updates_url" },
+  {
+    to: "/app/communities",
+    label: "Communities",
+    icon: UsersRound,
+    asset: "nav_communities_url",
+  },
+  { to: "/app/calls", label: "Calls", icon: Phone, asset: "nav_calls_url" },
+  { to: "/app/settings", label: "Settings", icon: Settings, asset: "nav_settings_url" },
+] as const;
 
 function useUnreadChats(userId: string | undefined) {
   const [unread, setUnread] = useState(0);
@@ -144,6 +150,7 @@ export function AppShell({
   const { profile } = useAuth();
   const location = useLocation();
   const unreadChats = useUnreadChats(profile?.id);
+  const { assets } = useBranding();
   const statusRings = useStatusRings();
   const unseenStatuses = Object.entries(statusRings).filter(
     ([userId, state]) => state === "unseen" && userId !== profile?.id,
@@ -192,13 +199,22 @@ export function AppShell({
                   cn(
                     "relative flex w-full flex-col items-center gap-1 rounded-md py-2 text-[0.58rem] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isActive
-                      ? "bg-accent text-primary"
+                      ? "bg-white/45 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-white/10"
                       : "text-muted-foreground hover:bg-secondary hover:text-foreground",
                   )
                 }
               >
                 <span className="relative">
-                  <Icon className="size-[23px]" strokeWidth={1.9} aria-hidden="true" />
+                  {assets[item.asset] ? (
+                    <img
+                      src={assets[item.asset]}
+                      alt=""
+                      className="size-[23px] object-contain"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Icon className="size-[23px]" strokeWidth={1.9} aria-hidden="true" />
+                  )}
                   {badge > 0 && (
                     <span className="absolute -top-1.5 -right-2 min-w-[14px] rounded-full bg-primary px-1 text-center text-[0.52rem] leading-[14px] font-semibold text-primary-foreground">
                       {badge > 99 ? "99+" : badge}
@@ -261,7 +277,16 @@ export function AppShell({
               }
             >
               <span className="relative">
-                <Icon className="size-[20px]" strokeWidth={1.9} aria-hidden="true" />
+                {assets[item.asset] ? (
+                  <img
+                    src={assets[item.asset]}
+                    alt=""
+                    className="size-[20px] object-contain"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Icon className="size-[20px]" strokeWidth={1.9} aria-hidden="true" />
+                )}
                 {badge > 0 && (
                   <span className="absolute -top-1.5 -right-2.5 min-w-[15px] rounded-full bg-primary px-1 text-center text-[0.55rem] leading-[15px] font-semibold text-primary-foreground shadow-sm">
                     {badge > 99 ? "99+" : badge}

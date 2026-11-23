@@ -4,11 +4,15 @@ import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
+  BadgeCheck,
   BarChart3,
   FileClock,
+  Hash,
+  Phone,
   Flag,
   Settings2,
   Shield,
+  Radio,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -18,7 +22,12 @@ import { NavLink, useNavigate } from "react-router";
 const ADMIN_NAV = [
   { to: "/admin", label: "Dashboard", icon: BarChart3, end: true },
   { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/groups", label: "Groups", icon: Users },
+  { to: "/admin/channels", label: "Channels", icon: Hash },
+  { to: "/admin/content", label: "Status & content", icon: Radio },
+  { to: "/admin/calls", label: "Calls", icon: Phone },
   { to: "/admin/reports", label: "Reports", icon: Flag },
+  { to: "/admin/verification", label: "Verification", icon: BadgeCheck },
   { to: "/admin/access", label: "Audit & team", icon: FileClock },
   { to: "/admin/settings", label: "Platform", icon: Settings2 },
   { to: "/admin/branding", label: "Branding", icon: Sparkles },

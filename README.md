@@ -29,6 +29,11 @@ page.
    - `supabase/migrations/0006_public_branding.sql`
    - `supabase/migrations/0007_restore_rls.sql`
    - `supabase/migrations/0008_phone_auth_only.sql`
+   - `supabase/migrations/0009_verification.sql`
+   - `supabase/migrations/0010_media_preferences.sql`
+   - `supabase/migrations/0011_view_once.sql`
+   - `supabase/migrations/0012_one_reaction_per_user.sql`
+   - `supabase/migrations/0013_status_media_rotation.sql`
 
    With the Supabase CLI:
 
@@ -301,6 +306,7 @@ src/
 api/
   turn.ts           verified, short-lived TURN credentials
 supabase/
-  migrations/       0001_pingo_core.sql … 0008_phone_auth_only.sql
-                    (0006 branding, 0007 RLS restoration, 0008 phone-only auth)
+  migrations/       0001_pingo_core.sql … 0013_status_media_rotation.sql
+                    (0006 branding, 0007 RLS restoration, 0008 phone-only auth,
+                     0009 verification, 0010 media download preferences)
 ```

@@ -1,5 +1,11 @@
 import "@vly-ai/integrations";
 import { Toaster } from "@/components/ui/sonner";
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
 import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
 import { BrandSplash } from "@/components/BrandSplash";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
@@ -81,6 +87,8 @@ const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminReports = lazy(() => import("./pages/admin/AdminReports.tsx"));
 const AdminAccess = lazy(() => import("./pages/admin/AdminAccess.tsx"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings.tsx"));
+const AdminVerification = lazy(() => import("./pages/admin/AdminVerification.tsx"));
+const AdminContent = lazy(() => import("./pages/admin/AdminContent.tsx"));
 const AdminBranding = lazy(() => import("./pages/admin/AdminBranding.tsx"));
 
 const AppShell = lazy(() =>
@@ -289,6 +297,11 @@ function AppProviders() {
             <Route path="access" element={<AdminAccess />} />
             <Route path="settings" element={<AdminSettings />} />
             <Route path="branding" element={<AdminBranding />} />
+            <Route path="verification" element={<AdminVerification />} />
+            <Route path="groups" element={<AdminContent mode="groups" />} />
+            <Route path="channels" element={<AdminContent mode="channels" />} />
+            <Route path="calls" element={<AdminContent mode="calls" />} />
+            <Route path="content" element={<AdminContent mode="statuses" />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

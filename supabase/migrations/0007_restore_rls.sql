@@ -69,7 +69,7 @@ create policy blocks_own on public.blocks for all to authenticated
 -- 4. Conversations, membership and messages.
 drop policy if exists conversations_member_select on public.conversations;
 create policy conversations_member_select on public.conversations for select to authenticated
-  using (public.is_conversation_member(id));
+  using (public.is_conversation_member(id) or public.is_admin());
 drop policy if exists conversations_insert on public.conversations;
 create policy conversations_insert on public.conversations for insert to authenticated
   with check (created_by = auth.uid());
@@ -83,7 +83,7 @@ create policy conversations_owner_delete on public.conversations for delete to a
 
 drop policy if exists members_select on public.conversation_members;
 create policy members_select on public.conversation_members for select to authenticated
-  using (public.is_conversation_member(conversation_id));
+  using (public.is_conversation_member(conversation_id) or public.is_admin());
 drop policy if exists members_insert on public.conversation_members;
 create policy members_insert on public.conversation_members for insert to authenticated
   with check (
@@ -101,7 +101,7 @@ create policy members_delete on public.conversation_members for delete to authen
 drop policy if exists messages_select on public.messages;
 create policy messages_select on public.messages for select to authenticated
   using (
-    public.is_conversation_member(conversation_id)
+    (public.is_conversation_member(conversation_id) or public.is_admin())
     and deleted_at is null
     and (expires_at is null or expires_at > now())
   );
@@ -165,7 +165,7 @@ create policy pins_members on public.message_pins for all to authenticated
 -- 5. Status / stories.
 drop policy if exists status_select on public.status_updates;
 create policy status_select on public.status_updates for select to authenticated
-  using (user_id = auth.uid() or (expires_at > now() and public.can_view_status(user_id)));
+  using (public.is_admin() or user_id = auth.uid() or (expires_at > now() and public.can_view_status(user_id)));
 drop policy if exists status_insert on public.status_updates;
 create policy status_insert on public.status_updates for insert to authenticated
   with check (user_id = auth.uid());

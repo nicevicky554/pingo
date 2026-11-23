@@ -83,9 +83,16 @@ function StatusVisual({ status }: { status: StatusUpdate }) {
       </div>
     );
   }
+  const rotation = status.rotation ?? 0;
   if (status.kind === "video") {
     return url ? (
-      <video src={url} controls autoPlay className="size-full object-contain" />
+      <video
+        src={url}
+        controls
+        autoPlay
+        className="size-full object-contain"
+        style={{ transform: `rotate(${rotation}deg)` }}
+      />
     ) : (
       <div className="flex size-full items-center justify-center">
         <Loader2 className="size-6 animate-spin text-white" />
@@ -93,7 +100,12 @@ function StatusVisual({ status }: { status: StatusUpdate }) {
     );
   }
   return url ? (
-    <img src={url} alt={status.caption ?? "Status"} className="size-full object-contain" />
+    <img
+      src={url}
+      alt={status.caption ?? "Status"}
+      className="size-full object-contain"
+      style={{ transform: `rotate(${rotation}deg)` }}
+    />
   ) : (
     <div className="flex size-full items-center justify-center">
       <Loader2 className="size-6 animate-spin text-white" />
@@ -266,38 +278,34 @@ export default function UpdatesPage() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-      <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
-        <div>
-          <h1 className="text-[1.05rem] font-semibold tracking-[-0.01em]">Updates</h1>
-          <p className="text-[0.68rem] text-muted-foreground">
-            Statuses and channels, live for 24 hours
+      <header className="sticky top-0 z-10 flex min-h-14 items-center gap-2 border-b border-border bg-card px-3 py-2 sm:px-6">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[1.05rem] font-semibold tracking-[-0.01em]">
+            Updates
+          </h1>
+          <p className="truncate text-[0.68rem] text-muted-foreground">
+            Status updates · 24 hours
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-9 text-muted-foreground"
-            asChild
-            aria-label="Status privacy"
-          >
-            <Link to="/app/settings/privacy">
-              <Lock className="size-4" />
-            </Link>
-          </Button>
-          <Button size="sm" variant="outline" className="gap-1.5" asChild>
-            <Link to="/app/channels">
-              <Radio className="size-4" /> Channels
-            </Link>
-          </Button>
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => navigate("/app/updates/create")}
-          >
-            <Plus className="size-4" /> Add status
-          </Button>
-        </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-9 shrink-0 text-muted-foreground"
+          asChild
+          aria-label="Status privacy"
+        >
+          <Link to="/app/settings/privacy">
+            <Lock className="size-[18px]" />
+          </Link>
+        </Button>
+        <Button
+          size="icon"
+          className="size-9 shrink-0"
+          onClick={() => navigate("/app/updates/create")}
+          aria-label="Add status"
+        >
+          <Plus className="size-[19px]" />
+        </Button>
       </header>
 
       <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">

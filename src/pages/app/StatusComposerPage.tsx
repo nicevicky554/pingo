@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { Image as ImageIcon, Loader2, Type, Video, X } from "lucide-react";
+import { Image as ImageIcon, Loader2, RotateCw, Type, Video, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
@@ -19,8 +19,9 @@ export default function StatusComposerPage() {
   const [body, setBody] = useState("");
   const [caption, setCaption] = useState("");
   const [background, setBackground] = useState(BACKGROUNDS[0]);
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [media, setMedia] = useState<
+    { file: File; url: string; kind: "image" | "video"; rotation: number }[]
+  >([]);
   const [audience, setAudience] = useState<"contacts" | "everyone" | "nobody">("contacts");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,19 +43,39 @@ export default function StatusComposerPage() {
   }, [profile]);
 
   function pick(event: React.ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0];
+    const next = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (!next) return;
-    const nextKind: Kind = next.type.startsWith("video/") ? "video" : "image";
-    if (next.size > 25 * 1024 * 1024) {
-      setError("Media must be smaller than 25 MB.");
+    if (next.length === 0) return;
+    const tooLarge = next.find((item) => item.size > 25 * 1024 * 1024);
+    if (tooLarge) {
+      setError(`${tooLarge.name} is larger than 25 MB.`);
       return;
     }
-    setKind(nextKind);
-    setFile(next);
-    setPreview(URL.createObjectURL(next));
+    const items = next.map((item) => ({
+      file: item,
+      url: URL.createObjectURL(item),
+      kind: (item.type.startsWith("video/") ? "video" : "image") as
+        | "image"
+        | "video",
+      rotation: 0,
+    }));
+    setMedia((current) => [...current, ...items].slice(0, 10));
+    setKind(items[0]?.kind ?? "image");
     setError(null);
   }
+
+  function removeMedia(url: string) {
+    URL.revokeObjectURL(url);
+    setMedia((current) => current.filter((item) => item.url !== url));
+  }
+
+  const mediaRef = useRef(media);
+  mediaRef.current = media;
+  useEffect(() => {
+    return () => {
+      for (const item of mediaRef.current) URL.revokeObjectURL(item.url);
+    };
+  }, []);
 
   async function publish() {
     if (!profile || busy) return;
@@ -62,8 +83,8 @@ export default function StatusComposerPage() {
       setError("Write something to share.");
       return;
     }
-    if (kind !== "text" && !file) {
-      setError("Choose a photo or video to share.");
+    if (kind !== "text" && media.length === 0) {
+      setError("Choose at least one photo or video to share.");
       return;
     }
     setBusy(true);
@@ -74,26 +95,44 @@ export default function StatusComposerPage() {
         .update({ status_visibility: audience })
         .eq("user_id", profile.id);
 
-      let mediaPath: string | null = null;
-      if (file) {
-        const extension = file.name.split(".").pop()?.toLowerCase() || "bin";
-        mediaPath = `${profile.id}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage
-          .from("status-media")
-          .upload(mediaPath, file, { contentType: file.type || undefined });
-        if (uploadError) throw uploadError;
-      }
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const items =
+        kind === "text"
+          ? [{ kind: "text" as const, item: null }]
+          : media.map((item) => ({ kind: item.kind, item }));
 
-      const { error: insertError } = await supabase.from("status_updates").insert({
-        user_id: profile.id,
-        kind,
-        body: kind === "text" ? body.trim() : null,
-        media_path: mediaPath,
-        background: kind === "text" ? background : null,
-        caption: kind === "text" ? null : caption.trim() || null,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      });
-      if (insertError) throw insertError;
+      for (const [index, entry] of items.entries()) {
+        let mediaPath: string | null = null;
+        if (entry.item) {
+          const extension =
+            entry.item.file.name.split(".").pop()?.toLowerCase() || "bin";
+          mediaPath = `${profile.id}/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await supabase.storage
+            .from("status-media")
+            .upload(mediaPath, entry.item.file, {
+              contentType: entry.item.file.type || undefined,
+            });
+          if (uploadError) throw uploadError;
+        }
+
+        const { error: insertError } = await supabase.from("status_updates").insert({
+          user_id: profile.id,
+          kind: entry.kind,
+          body: entry.kind === "text" ? body.trim() : null,
+          media_path: mediaPath,
+          background: entry.kind === "text" ? background : null,
+          rotation: entry.item?.rotation ?? 0,
+          caption:
+            entry.kind === "text"
+              ? null
+              : [caption.trim(), index > 0 ? `Part ${index + 1}` : ""]
+                  .filter(Boolean)
+                  .join(" · ") || null,
+          expires_at: expiresAt,
+        });
+        if (insertError) throw insertError;
+      }
+      for (const item of media) URL.revokeObjectURL(item.url);
       navigate("/app/updates", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "The status could not be shared.");
@@ -134,8 +173,8 @@ export default function StatusComposerPage() {
               onClick={() => {
                 setKind(id);
                 if (id === "text") {
-                  setFile(null);
-                  setPreview(null);
+                  for (const item of media) URL.revokeObjectURL(item.url);
+                  setMedia([]);
                 } else {
                   input.current?.click();
                 }
@@ -160,28 +199,54 @@ export default function StatusComposerPage() {
                 {body || "Type your status…"}
               </p>
             </div>
-          ) : preview ? (
-            <div className="relative size-full">
-              {kind === "video" ? (
-                <video src={preview} controls className="max-h-[60dvh] w-full rounded-xl bg-black" />
-              ) : (
-                <img
-                  src={preview}
-                  alt="Status preview"
-                  className="max-h-[60dvh] w-full rounded-xl object-contain"
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setFile(null);
-                  setPreview(null);
-                }}
-                aria-label="Remove media"
-                className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-black/60"
-              >
-                <X className="size-4" />
-              </button>
+          ) : media.length > 0 ? (
+            <div className={cn("grid w-full gap-2", media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
+              {media.map((item) => (
+                <div key={item.url} className="relative overflow-hidden rounded-xl bg-black">
+                  {item.kind === "video" ? (
+                    <video
+                      src={item.url}
+                      controls
+                      className="max-h-[46dvh] w-full object-contain"
+                      style={{ transform: `rotate(${item.rotation}deg)` }}
+                    />
+                  ) : (
+                    <img
+                      src={item.url}
+                      alt="Status preview"
+                      className="max-h-[46dvh] w-full object-contain"
+                      style={{ transform: `rotate(${item.rotation}deg)` }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMedia((current) =>
+                        current.map((entry) =>
+                          entry.url === item.url
+                            ? {
+                                ...entry,
+                                rotation: (entry.rotation + 90) % 360,
+                              }
+                            : entry,
+                        ),
+                      )
+                    }
+                    aria-label="Rotate media"
+                    className="absolute bottom-2 left-2 flex size-8 items-center justify-center rounded-full bg-black/60"
+                  >
+                    <RotateCw className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeMedia(item.url)}
+                    aria-label="Remove media"
+                    className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-black/60"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           ) : (
             <button
@@ -199,6 +264,7 @@ export default function StatusComposerPage() {
           ref={input}
           type="file"
           accept={kind === "video" ? "video/*" : "image/*,video/*"}
+          multiple
           className="hidden"
           onChange={pick}
         />

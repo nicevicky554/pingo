@@ -26,6 +26,11 @@ Convex dependency.
    - `supabase/migrations/0006_public_branding.sql`
    - `supabase/migrations/0007_restore_rls.sql`
    - `supabase/migrations/0008_phone_auth_only.sql`
+   - `supabase/migrations/0009_verification.sql`
+   - `supabase/migrations/0010_media_preferences.sql`
+   - `supabase/migrations/0011_view_once.sql`
+   - `supabase/migrations/0012_one_reaction_per_user.sql`
+   - `supabase/migrations/0013_status_media_rotation.sql`
 
     Migration 0007 enables RLS and recreates all public, Storage and Realtime
     policies. Normal browser requests use the publishable key and the user's
@@ -54,7 +59,8 @@ Preview and Development.
 | `VITE_SUPABASE_ANON_KEY` | client | yes | Public anon/publishable key |
 | `SUPABASE_URL` | server | yes | Same URL, used by `/api/turn` to verify sessions |
 | `SUPABASE_PUBLISHABLE_KEY` | server | optional | Server-side publishable key alias |
-| `SUPABASE_SECRET_KEY` | server only | optional | Privileged server key; never expose to Vite |
+| `SUPABASE_SECRET_KEY` | server only | yes for media/message fallback | Privileged server key; never expose to Vite. Used by `api/media/upload-url.ts` and `api/messages/send.ts` after token/membership checks. |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | server only | optional | Short-lived rate-limit counters for uploads and message sends. PostgreSQL remains authoritative. |
 | `SUPABASE_ANON_KEY` | server | yes | Legacy alias for the publishable key |
 | `TWILIO_ACCOUNT_SID` | server | for TURN | Twilio account identifier |
 | `TWILIO_API_KEY` | server | for TURN | Twilio API Key SID |

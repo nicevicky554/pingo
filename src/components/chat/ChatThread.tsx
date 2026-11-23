@@ -388,6 +388,7 @@ export function ChatThread({
         waveform: outgoing.waveform ?? null,
         replyToId,
         disappearSeconds: conversation.disappear_seconds,
+        viewOnce: outgoing.viewOnce,
       });
 
       setMessages((current) => {
@@ -441,6 +442,7 @@ export function ChatThread({
       sender_id: currentUserId,
       body: outgoing.body,
       kind: outgoing.kind ?? "text",
+      view_once: outgoing.viewOnce,
       attachment_path: null,
       attachment_name: outgoing.fileName ?? null,
       attachment_size: outgoing.file?.size ?? null,
@@ -539,11 +541,16 @@ export function ChatThread({
           emoji,
         });
     } else {
-      await supabase.from("message_reactions").insert({
-        message_id: message.id,
-        user_id: currentUserId,
-        emoji,
-      });
+      // One active reaction per user per message: replacing the emoji updates
+      // the existing row instead of adding a second reaction.
+      await supabase.from("message_reactions").upsert(
+        {
+          message_id: message.id,
+          user_id: currentUserId,
+          emoji,
+        },
+        { onConflict: "message_id,user_id" },
+      );
     }
     await refreshReceipts();
   }

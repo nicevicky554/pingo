@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   AudioLines,
   Camera,
+  Eye,
   FileText,
   Image as ImageIcon,
   Loader2,
@@ -40,6 +41,7 @@ export type OutgoingMessage = {
   kind?: Message["kind"];
   durationSeconds?: number;
   waveform?: number[];
+  viewOnce?: boolean;
 };
 
 const MAX_FILE = 25 * 1024 * 1024;
@@ -135,6 +137,7 @@ export function Composer({
   const draftKey = `pingo:draft:${conversationId}`;
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [viewOnce, setViewOnce] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendingCount, setSendingCount] = useState(0);
   const sendingRef = useRef(false);
@@ -149,6 +152,9 @@ export function Composer({
     peaks: number[];
   } | null>(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [voicePlaying, setVoicePlaying] = useState(false);
+  const [voiceProgress, setVoiceProgress] = useState(0);
+  const voiceAudioRef = useRef<HTMLAudioElement>(null);
   const [livePeaks, setLivePeaks] = useState<number[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -212,6 +218,7 @@ export function Composer({
     if ((!body && files.length === 0) || sendingRef.current) return;
     sendingRef.current = true;
     const attachments = [...files];
+    const sendAsViewOnce = viewOnce;
     setSending(true);
     setSendingCount(attachments.length);
     setProgress(attachments.length > 0 ? 0 : 100);
@@ -219,6 +226,7 @@ export function Composer({
     // Clear immediately; optimistic messages are already in the thread.
     setText("");
     setFiles([]);
+    setViewOnce(false);
     window.sessionStorage.removeItem(draftKey);
     if (attachments.length > 0) onActivity?.("uploading");
     try {
@@ -236,6 +244,10 @@ export function Composer({
                 : attachment.type.startsWith("video/")
                   ? "video"
                   : "file",
+              viewOnce:
+                sendAsViewOnce &&
+                (attachment.type.startsWith("image/") ||
+                  attachment.type.startsWith("video/")),
             },
             (percent) =>
               setProgress(
@@ -437,6 +449,7 @@ export function Composer({
         ref={imageInput}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
         onChange={pickFiles}
       />
@@ -503,12 +516,89 @@ export function Composer({
               }
             />
           ))}
+          {files.some(
+            (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
+          ) && (
+            <button
+              type="button"
+              aria-pressed={viewOnce}
+              onClick={() => setViewOnce((value) => !value)}
+              className={cn(
+                "flex shrink-0 flex-col items-center justify-center gap-1 rounded-lg border px-2.5 text-[0.6rem] font-medium",
+                viewOnce
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-secondary/60 text-muted-foreground",
+              )}
+            >
+              <Eye className="size-4" /> 1×
+            </button>
+          )}
         </div>
       )}
 
       {pendingVoice && !recording && (
-        <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-secondary/60 px-2.5 py-2">
-          <audio src={pendingVoice.url} controls className="h-8 min-w-0 flex-1" />
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2">
+          <audio
+            ref={voiceAudioRef}
+            src={pendingVoice.url}
+            className="hidden"
+            onTimeUpdate={(event) => {
+              const audio = event.currentTarget;
+              setVoiceProgress(
+                audio.duration ? audio.currentTime / audio.duration : 0,
+              );
+            }}
+            onEnded={() => {
+              setVoicePlaying(false);
+              setVoiceProgress(0);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const audio = voiceAudioRef.current;
+              if (!audio) return;
+              if (audio.paused) {
+                void audio.play();
+                setVoicePlaying(true);
+              } else {
+                audio.pause();
+                setVoicePlaying(false);
+              }
+            }}
+            aria-label={voicePlaying ? "Pause voice note" : "Play voice note"}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+          >
+            {voicePlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+          </button>
+          <button
+            type="button"
+            className="flex h-8 min-w-0 flex-1 items-center gap-[2px]"
+            aria-label="Seek voice note"
+            onClick={(event) => {
+              const audio = voiceAudioRef.current;
+              if (!audio || !audio.duration) return;
+              const rect = event.currentTarget.getBoundingClientRect();
+              audio.currentTime =
+                ((event.clientX - rect.left) / rect.width) * audio.duration;
+            }}
+          >
+            {(pendingVoice.peaks.length > 0
+              ? pendingVoice.peaks
+              : Array.from({ length: BAR_COUNT }, () => 20)
+            ).map((peak, index, all) => (
+              <span
+                key={index}
+                className={cn(
+                  "w-[2px] shrink-0 rounded-full",
+                  index / all.length <= voiceProgress
+                    ? "bg-primary"
+                    : "bg-muted-foreground/40",
+                )}
+                style={{ height: `${Math.max(4, (peak / 100) * 26)}px` }}
+              />
+            ))}
+          </button>
           <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground">
             {Math.floor(pendingVoice.seconds / 60)}:
             {String(pendingVoice.seconds % 60).padStart(2, "0")}
@@ -516,8 +606,11 @@ export function Composer({
           <button
             type="button"
             onClick={() => {
+              voiceAudioRef.current?.pause();
               URL.revokeObjectURL(pendingVoice.url);
               setPendingVoice(null);
+              setVoicePlaying(false);
+              setVoiceProgress(0);
             }}
             aria-label="Discard voice note"
             className="text-muted-foreground hover:text-foreground"

@@ -37,6 +37,20 @@ const ASSETS: {
     label: "Default community image",
     hint: "Square image",
   },
+  { key: "nav_chats_url", label: "Chats navigation icon", hint: "Transparent SVG/PNG" },
+  { key: "nav_updates_url", label: "Updates navigation icon", hint: "Transparent SVG/PNG" },
+  {
+    key: "nav_communities_url",
+    label: "Communities navigation icon",
+    hint: "Transparent SVG/PNG",
+  },
+  { key: "nav_calls_url", label: "Calls navigation icon", hint: "Transparent SVG/PNG" },
+  {
+    key: "nav_settings_url",
+    label: "Settings navigation icon",
+    hint: "Transparent SVG/PNG",
+  },
+  { key: "verified_badge_url", label: "Verified badge", hint: "Small transparent SVG/PNG" },
 ];
 
 const MAX_BYTES = 4 * 1024 * 1024;

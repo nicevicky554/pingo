@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/app/PageHeader";
+import { VerifiedBadge } from "@/components/VerifiedBadge";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
@@ -195,8 +196,9 @@ export default function ProfilePage() {
             showPresence
             ring={statusRing}
           />
-          <h2 className="mt-4 text-[1.35rem] font-semibold tracking-[-0.02em]">
+          <h2 className="mt-4 flex items-center justify-center gap-1.5 text-[1.35rem] font-semibold tracking-[-0.02em]">
             {person.display_name || person.username}
+            <VerifiedBadge verified={person.is_verified} />
           </h2>
           <p className="text-sm text-muted-foreground">@{person.username}</p>
           <p className="mt-1 text-xs font-medium text-muted-foreground">

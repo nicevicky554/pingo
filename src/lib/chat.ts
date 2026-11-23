@@ -104,6 +104,7 @@ export async function sendMessage(input: {
   waveform?: number[] | null;
   replyToId?: string | null;
   disappearSeconds?: number | null;
+  viewOnce?: boolean;
 }) {
   const expiresAt = input.disappearSeconds
     ? new Date(Date.now() + input.disappearSeconds * 1000).toISOString()
@@ -120,6 +121,7 @@ export async function sendMessage(input: {
     duration_seconds: input.durationSeconds ?? null,
     reply_to_id: input.replyToId ?? null,
     expires_at: expiresAt,
+    view_once: input.viewOnce === true,
   };
   if (input.waveform && input.waveform.length > 0) {
     payload.waveform = input.waveform;
@@ -135,6 +137,40 @@ export async function sendMessage(input: {
     delete payload.waveform;
     ({ data, error } = await insert());
   }
+
+  // If browser RLS rejects the insert, retry through the server endpoint. The
+  // server independently verifies the token, membership and posting rights;
+  // it never trusts senderId from this payload.
+  if (error && (error.code === "42501" || /row-level security/i.test(error.message))) {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (token) {
+        const response = await fetch("/api/messages/send", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (response.ok) {
+          const result = (await response.json()) as { message?: Message };
+          if (result.message) return result.message;
+        } else if (response.status !== 404) {
+          const detail = (await response.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          throw new Error(detail.error || "The server rejected the message.");
+        }
+      }
+    } catch (fallbackError) {
+      if (fallbackError instanceof Error && fallbackError.message) {
+        throw new Error(`${error.message} · ${fallbackError.message}`);
+      }
+    }
+  }
+
   if (error) throw error;
   if (!data) throw new Error("The message was not saved. Try again.");
   return data;
@@ -197,6 +233,48 @@ export async function uploadChatAttachment(
 ) {
   const safeName = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
   const path = `${conversationId}/${crypto.randomUUID()}-${safeName}`;
+
+  // Preferred path: the server verifies membership with the secret-key client
+  // and returns a one-off signed upload token. This avoids browser-side Storage
+  // policy failures for voice notes and other private attachments.
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) {
+      onProgress?.(1);
+      const response = await fetch("/api/media/upload-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          conversationId,
+          name,
+          size: file.size,
+          type: file.type,
+        }),
+      });
+      if (response.ok) {
+        const signed = (await response.json()) as { path: string; token: string };
+        const { error } = await supabase.storage
+          .from("media")
+          .uploadToSignedUrl(signed.path, signed.token, file, {
+            contentType: file.type || undefined,
+          });
+        if (!error) {
+          onProgress?.(100);
+          return signed.path;
+        }
+        console.warn("[PINGO] signed upload failed, retrying direct upload", error.message);
+      } else if (response.status !== 404) {
+        const detail = await response.json().catch(() => ({}));
+        console.warn("[PINGO] signed upload URL rejected", response.status, detail);
+      }
+    }
+  } catch (err) {
+    console.warn("[PINGO] signed upload unavailable", err);
+  }
 
   if (SUPABASE_URL && SUPABASE_ANON_KEY && onProgress && file.size > 0) {
     const baseUrl = SUPABASE_URL;

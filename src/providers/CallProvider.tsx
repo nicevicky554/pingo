@@ -18,6 +18,7 @@ import {
   SwitchCamera,
   Video as VideoIcon,
   VideoOff,
+  Volume2,
 } from "lucide-react";
 import {
   createContext,
@@ -47,6 +48,7 @@ type CallSession = {
   conversationId: string;
   peer: CallPeer;
   kind: CallKind;
+  isCaller: boolean;
   incomingOffer?: RTCSessionDescriptionInit;
   muted: boolean;
   cameraOff: boolean;
@@ -122,6 +124,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [outputDevice, setOutputDevice] = useState("default");
   const [quality, setQuality] = useState<{
     height: number;
     bitrateKbps: number;
@@ -137,6 +140,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
   const startedAtRef = useRef<number | null>(null);
+  const recordedCallIds = useRef(new Set<string>());
   const opsRef = useRef<{
     invite: (payload: Record<string, unknown>) => void;
     answer: (payload: Record<string, unknown>) => void;
@@ -236,6 +240,31 @@ export function CallProvider({ children }: { children: ReactNode }) {
         call_id: current.callId,
         reason: state,
       });
+
+      if (
+        current.isCaller &&
+        profile?.id &&
+        current.conversationId &&
+        current.callId &&
+        !recordedCallIds.current.has(current.callId)
+      ) {
+        recordedCallIds.current.add(current.callId);
+        const kindLabel = current.kind === "video" ? "video call" : "voice call";
+        const body =
+          state === "missed"
+            ? `missed a ${kindLabel}`
+            : state === "declined"
+              ? `declined a ${kindLabel}`
+              : state === "failed"
+                ? `${kindLabel} failed`
+                : `started a ${kindLabel}${duration ? ` (${Math.floor(duration / 60)}m ${duration % 60}s)` : ""}`;
+        void supabase.from("messages").insert({
+          conversation_id: current.conversationId,
+          sender_id: profile.id,
+          kind: "system",
+          body,
+        });
+      }
 
       pcRef.current?.getSenders().forEach((sender) => sender.track?.stop());
       pcRef.current?.close();
@@ -387,6 +416,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         conversationId,
         peer,
         kind,
+        isCaller: true,
         muted: false,
         cameraOff: false,
       });
@@ -489,6 +519,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         conversationId: String(payload.conversation_id ?? ""),
         peer: caller,
         kind: payload.kind === "video" ? "video" : "voice",
+        isCaller: false,
         incomingOffer: payload.offer as RTCSessionDescriptionInit,
         muted: false,
         cameraOff: false,
@@ -695,6 +726,43 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
   }, [profile?.id]);
 
+  // Original locally generated ringback / incoming tone.
+  useEffect(() => {
+    if (!session) return;
+    if (session.phase !== "outgoing" && session.phase !== "incoming") return;
+    let context: AudioContext | null = null;
+    let interval: number | null = null;
+    const playTone = () => {
+      try {
+        context ??= new AudioContext();
+        if (context.state === "suspended") void context.resume();
+        const now = context.currentTime;
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.06, now + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+        gain.connect(context.destination);
+        const osc = context.createOscillator();
+        osc.type = "sine";
+        osc.frequency.value = session.phase === "incoming" ? 523 : 425;
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.45);
+      } catch {
+        // Audio output may be unavailable; signalling continues.
+      }
+    };
+    playTone();
+    interval = window.setInterval(
+      playTone,
+      session.phase === "incoming" ? 1400 : 3000,
+    );
+    return () => {
+      if (interval) window.clearInterval(interval);
+      void context?.close();
+    };
+  }, [session?.phase]);
+
   // Ring timeout and duration timer.
   useEffect(() => {
     if (!session) return;
@@ -822,6 +890,34 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
     updateSession({ muted: enabled });
   }, [updateSession]);
+
+  const cycleAudioOutput = useCallback(async () => {
+    const audio = remoteAudioRef.current as
+      | (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> })
+      | null;
+    if (!audio?.setSinkId) {
+      setNotice("This browser does not expose audio output selection.");
+      return;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter((device) => device.kind === "audiooutput");
+      if (outputs.length < 2) {
+        setNotice("Only one audio output is available on this device.");
+        return;
+      }
+      const index = Math.max(
+        0,
+        outputs.findIndex((device) => device.deviceId === outputDevice),
+      );
+      const next = outputs[(index + 1) % outputs.length];
+      await audio.setSinkId(next.deviceId);
+      setOutputDevice(next.deviceId);
+      setNotice(`Audio output: ${next.label || "selected device"}`);
+    } catch {
+      setNotice("Audio output could not be changed.");
+    }
+  }, [outputDevice]);
 
   const toggleCamera = useCallback(() => {
     const stream = localStreamRef.current;
@@ -1073,6 +1169,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
               </>
             ) : (
               <>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  aria-label="Change audio output"
+                  title="Speaker / audio output"
+                  className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
+                  onClick={() => void cycleAudioOutput()}
+                >
+                  <Volume2 className="size-5" />
+                </Button>
                 <Button
                   variant="secondary"
                   size="icon"
