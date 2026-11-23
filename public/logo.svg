@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="PINGO">
-  <rect width="512" height="512" rx="132" fill="#126B78"/>
-  <circle cx="256" cy="256" r="44" fill="#EAFBF8"/>
-  <path d="M170 256a86 86 0 0 1 86-86" fill="none" stroke="#EAFBF8" stroke-width="30" stroke-linecap="round" opacity="0.92"/>
-  <path d="M116 256a140 140 0 0 1 140-140" fill="none" stroke="#EAFBF8" stroke-width="30" stroke-linecap="round" opacity="0.55"/>
-  <path d="M342 256a86 86 0 0 1-86 86" fill="none" stroke="#EAFBF8" stroke-width="30" stroke-linecap="round" opacity="0.92"/>
-  <path d="M396 256a140 140 0 0 1-140 140" fill="none" stroke="#EAFBF8" stroke-width="30" stroke-linecap="round" opacity="0.55"/>
-</svg>
