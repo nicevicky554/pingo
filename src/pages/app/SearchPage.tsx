@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/app/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
 import { useAuth } from "@/hooks/use-auth";
+import { useStatusRings } from "@/hooks/use-status-rings";
 import {
   searchMessages,
   searchPeople,
@@ -23,6 +24,7 @@ type MessageHit = {
 
 export default function SearchPage() {
   const { profile } = useAuth();
+  const statusRings = useStatusRings();
   const navigate = useNavigate();
   const [term, setTerm] = useState("");
   const [tab, setTab] = useState<Tab>("people");
@@ -145,7 +147,12 @@ export default function SearchPage() {
                 onClick={() => void openPerson(person)}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-secondary/70"
               >
-                <UserAvatar profile={person} size="md" showPresence />
+                <UserAvatar
+                  profile={person}
+                  size="md"
+                  showPresence
+                  ring={statusRings[person.id] ?? null}
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[0.86rem] font-semibold">
                     {person.display_name || person.username}

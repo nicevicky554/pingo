@@ -41,7 +41,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 export default function Onboarding() {
-  const { profile, refresh, signOut } = useAuth();
+  const { profile, session, refresh, signOut } = useAuth();
   const [step, setStep] = useState(0);
   const [name, setName] = useState(profile?.display_name ?? "");
   const [username, setUsername] = useState(profile?.username ?? "");
@@ -190,13 +190,12 @@ export default function Onboarding() {
         }
       }
 
-      const testPhone = window.localStorage.getItem("pingo:test_phone");
       const baseUpdate = {
         display_name: name.trim(),
         username,
         about: about.trim(),
         avatar_path: avatarPath,
-        phone: testPhone ?? profile.phone ?? null,
+        phone: session?.user.phone ?? profile.phone ?? null,
         updated_at: new Date().toISOString(),
       };
       let { error: updateError } = await supabase
@@ -220,7 +219,6 @@ export default function Onboarding() {
         }
         throw updateError;
       }
-      window.localStorage.removeItem("pingo:test_phone");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save your profile.");

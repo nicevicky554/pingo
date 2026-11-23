@@ -80,7 +80,7 @@ export function UserAvatar({
         ring &&
           "rounded-full p-[2px] " +
             (ring === "unseen"
-              ? "bg-[var(--accent)]"
+              ? "status-ring-unseen"
               : ring === "own"
                 ? "bg-primary"
                 : "bg-muted-foreground/35"),

@@ -54,24 +54,15 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
-  const [authMode, setAuthMode] = useState<"test" | "live" | null>(null);
   const [attempts, setAttempts] = useState(0);
 
   const country = useMemo(() => findCountry(countryIso), [countryIso]);
   const digits = phone.replace(/\D/g, "");
-  const canSend = digits.length >= 6 && authMode !== null;
+  const canSend = digits.length >= 6;
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) navigate(redirect, { replace: true });
   }, [authLoading, isAuthenticated, navigate, redirect]);
-
-  useEffect(() => {
-    if (!isSupabaseConfigured) return;
-    supabase.rpc("get_auth_mode").then(({ data, error: modeError }) => {
-      if (!modeError && (data === "test" || data === "live")) setAuthMode(data);
-      else setAuthMode("test");
-    });
-  }, []);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -81,20 +72,16 @@ export default function AuthPage() {
 
   async function sendCode(event?: React.FormEvent) {
     event?.preventDefault();
-    if (!canSend || !authMode) return;
+    if (!canSend) return;
     setLoading(true);
     setError(null);
     const target = `+${country.dial}${digits.replace(/^0+/, "")}`;
     try {
-      if (authMode === "test") {
-        window.localStorage.setItem("pingo:test_phone", target);
-        setFullPhone(target);
-        setStep("code");
-        setSecondsLeft(30);
-        return;
-      }
+      // Supabase Auth creates the user on first verification and restores the
+      // same auth.users row on every later sign-in. No anonymous fallback.
       const { error: authError } = await supabase.auth.signInWithOtp({
         phone: target,
+        options: { shouldCreateUser: true },
       });
       if (authError) throw authError;
       setFullPhone(target);
@@ -113,12 +100,6 @@ export default function AuthPage() {
     setLoading(true);
     setError(null);
     try {
-      if (authMode === "test") {
-        const { error: authError } = await supabase.auth.signInAnonymously();
-        if (authError) throw authError;
-        navigate(redirect, { replace: true });
-        return;
-      }
       const { error: authError } = await supabase.auth.verifyOtp({
         phone: fullPhone,
         token: otp,
@@ -246,13 +227,6 @@ export default function AuthPage() {
               </p>
             </div>
 
-            {authMode === "test" && (
-              <p className="mt-5 rounded-md bg-amber-500/10 px-3 py-2 text-[0.72rem] leading-5 text-amber-800 dark:text-amber-200">
-                Test mode is active. No SMS is sent — any six digits will sign
-                you in.
-              </p>
-            )}
-
             {error && (
               <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
                 {error}
@@ -308,19 +282,8 @@ export default function AuthPage() {
               Enter verification code
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {authMode === "test" ? (
-                <>
-                  Test mode is active for{" "}
-                  <span className="font-medium text-foreground">{fullPhone}</span>
-                  . Enter any six digits.
-                </>
-              ) : (
-                <>
-                  We sent a six-digit code to{" "}
-                  <span className="font-medium text-foreground">{fullPhone}</span>
-                  .
-                </>
-              )}
+              We sent a six-digit code to{" "}
+              <span className="font-medium text-foreground">{fullPhone}</span>.
             </p>
 
             <div className="mt-7">
@@ -371,9 +334,7 @@ export default function AuthPage() {
             </Button>
 
             <div className="mt-5 text-center text-xs text-muted-foreground">
-              {authMode === "test" ? (
-                <span>No message is sent while test mode is on.</span>
-              ) : secondsLeft > 0 ? (
+              {secondsLeft > 0 ? (
                 <span>Resend available in {secondsLeft}s</span>
               ) : (
                 <button
@@ -396,13 +357,6 @@ export default function AuthPage() {
 function friendlyAuthError(error: unknown) {
   const message =
     error instanceof Error ? error.message : "Something went wrong. Try again.";
-  if (
-    /anonymous.*(disabled|not enabled|not allowed)|anonymous sign-?ins? are disabled/i.test(
-      message,
-    )
-  ) {
-    return "Test mode needs Anonymous sign-ins enabled in Supabase → Authentication → Providers.";
-  }
   if (/provider is not enabled|phone.*not enabled/i.test(message)) {
     return "Phone sign-in is not enabled in Supabase yet. Enable the Phone provider and an SMS provider.";
   }

@@ -29,6 +29,26 @@ const CommunitiesPage = lazy(() => import("./pages/app/CommunitiesPage.tsx"));
 const CallsPage = lazy(() => import("./pages/app/CallsPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/app/SettingsPage.tsx"));
 const SettingsHomePage = lazy(() => import("./pages/app/SettingsHomePage.tsx"));
+const ChatsSettingsPage = lazy(() =>
+  import("./pages/app/SettingsExtraPages.tsx").then((m) => ({
+    default: m.ChatsSettingsPage,
+  })),
+);
+const DevicesSettingsPage = lazy(() =>
+  import("./pages/app/SettingsExtraPages.tsx").then((m) => ({
+    default: m.DevicesSettingsPage,
+  })),
+);
+const StorageSettingsPage = lazy(() =>
+  import("./pages/app/SettingsExtraPages.tsx").then((m) => ({
+    default: m.StorageSettingsPage,
+  })),
+);
+const HelpSettingsPage = lazy(() =>
+  import("./pages/app/SettingsExtraPages.tsx").then((m) => ({
+    default: m.HelpSettingsPage,
+  })),
+);
 const NewMessagePage = lazy(() => import("./pages/app/NewMessagePage.tsx"));
 const SearchPage = lazy(() => import("./pages/app/SearchPage.tsx"));
 const ProfilePage = lazy(() => import("./pages/app/ProfilePage.tsx"));
@@ -38,6 +58,12 @@ const CreateChannelPage = lazy(() => import("./pages/app/CreateChannelPage.tsx")
 const ChannelPage = lazy(() => import("./pages/app/ChannelPage.tsx"));
 const ChannelComposePage = lazy(
   () => import("./pages/app/ChannelComposePage.tsx"),
+);
+const ChannelMembersPage = lazy(
+  () => import("./pages/app/ChannelMembersPage.tsx"),
+);
+const ChannelDiscoveryPage = lazy(
+  () => import("./pages/app/ChannelDiscoveryPage.tsx"),
 );
 const CreateCommunityPage = lazy(
   () => import("./pages/app/CreateCommunityPage.tsx"),
@@ -209,11 +235,21 @@ function AppProviders() {
             <Route path="profile/:userId" element={<ProfilePage />} />
             <Route path="groups/create" element={<CreateGroupPage />} />
             <Route path="groups/:conversationId" element={<GroupInfoPage />} />
+            <Route path="groups/:conversationId/info" element={<GroupInfoPage />} />
+            <Route path="channels" element={<ChannelDiscoveryPage />} />
             <Route path="channels/create" element={<CreateChannelPage />} />
             <Route path="channels/:channelId" element={<ChannelPage />} />
             <Route
               path="channels/:channelId/compose"
               element={<ChannelComposePage />}
+            />
+            <Route
+              path="channels/:channelId/admins"
+              element={<ChannelMembersPage mode="admins" />}
+            />
+            <Route
+              path="channels/:channelId/subscribers"
+              element={<ChannelMembersPage mode="subscribers" />}
             />
             <Route path="updates" element={<UpdatesPage />} />
             <Route path="updates/create" element={<StatusComposerPage />} />
@@ -221,6 +257,10 @@ function AppProviders() {
             <Route path="communities/create" element={<CreateCommunityPage />} />
             <Route path="calls" element={<CallsPage />} />
             <Route path="settings" element={<SettingsHomePage />} />
+            <Route path="settings/chats" element={<ChatsSettingsPage />} />
+            <Route path="settings/devices" element={<DevicesSettingsPage />} />
+            <Route path="settings/storage" element={<StorageSettingsPage />} />
+            <Route path="settings/help" element={<HelpSettingsPage />} />
             <Route path="settings/:section" element={<SettingsPage />} />
           </Route>
 

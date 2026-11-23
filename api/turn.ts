@@ -33,6 +33,7 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
 
   const supabaseUrl = pick(process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL);
   const anonKey = pick(
+    process.env.SUPABASE_PUBLISHABLE_KEY,
     process.env.SUPABASE_ANON_KEY,
     process.env.VITE_SUPABASE_ANON_KEY,
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY,

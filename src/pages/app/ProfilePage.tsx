@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { useStatusRings } from "@/hooks/use-status-rings";
 import { usePresence } from "@/providers/PresenceProvider";
 import { useCall } from "@/providers/CallProvider";
 import { startDirectConversation } from "@/lib/chat";
@@ -26,6 +27,7 @@ export default function ProfilePage() {
   const { profile: me, session } = useAuth();
   const { startCall } = useCall();
   const { online } = usePresence();
+  const statusRings = useStatusRings();
   const navigate = useNavigate();
   const [person, setPerson] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -163,6 +165,7 @@ export default function ProfilePage() {
 
   const visibleOnline =
     person.online_visibility === "everyone" && online.has(person.id);
+  const statusRing = statusRings[person.id] ?? null;
 
   return (
     <div className="page-enter min-h-0 flex-1 overflow-y-auto bg-background">
@@ -185,7 +188,13 @@ export default function ProfilePage() {
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6">
         <div className="flex flex-col items-center text-center">
-          <UserAvatar profile={person} size="xl" className="size-28" showPresence />
+          <UserAvatar
+            profile={person}
+            size="xl"
+            className="size-28"
+            showPresence
+            ring={statusRing}
+          />
           <h2 className="mt-4 text-[1.35rem] font-semibold tracking-[-0.02em]">
             {person.display_name || person.username}
           </h2>
@@ -206,6 +215,22 @@ export default function ProfilePage() {
             <p className="mt-4 max-w-md text-sm leading-6 text-foreground/90">
               {person.about}
             </p>
+          )}
+          {statusRing && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4 gap-1.5"
+              onClick={() => navigate(`/app/updates?statusUser=${person.id}`)}
+            >
+              <span
+                className={cn(
+                  "size-2.5 rounded-full",
+                  statusRing === "unseen" ? "bg-[var(--accent)]" : "bg-muted-foreground/50",
+                )}
+              />
+              {statusRing === "unseen" ? "View new status" : "View status"}
+            </Button>
           )}
         </div>
 

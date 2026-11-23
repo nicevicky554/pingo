@@ -361,6 +361,10 @@ export function MessageBubble({
   const [draft, setDraft] = useState(message.body);
   const [saving, setSaving] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [swipeX, setSwipeX] = useState(0);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const swiping = useRef(false);
+  const suppressClick = useRef(false);
 
   // Deletion for everyone removes the message entirely — no tombstone.
   if (message.deleted_at) return null;
@@ -404,7 +408,47 @@ export function MessageBubble({
         )}
 
         <div
-          onClick={() => setActionsOpen((open) => !open)}
+          onClick={() => {
+            if (suppressClick.current) {
+              suppressClick.current = false;
+              return;
+            }
+            setActionsOpen((open) => !open);
+          }}
+          onPointerDown={(event) => {
+            if (event.pointerType === "mouse") return;
+            swipeStart.current = { x: event.clientX, y: event.clientY };
+            swiping.current = false;
+          }}
+          onPointerMove={(event) => {
+            const start = swipeStart.current;
+            if (!start) return;
+            const dx = event.clientX - start.x;
+            const dy = event.clientY - start.y;
+            if (!swiping.current) {
+              if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.4) swiping.current = true;
+              else if (Math.abs(dy) > 10) swipeStart.current = null;
+            }
+            if (swiping.current) setSwipeX(Math.min(72, Math.max(0, dx)));
+          }}
+          onPointerUp={() => {
+            if (swiping.current && swipeX >= 52) {
+              onReply();
+              suppressClick.current = true;
+            }
+            swipeStart.current = null;
+            swiping.current = false;
+            setSwipeX(0);
+          }}
+          onPointerCancel={() => {
+            swipeStart.current = null;
+            swiping.current = false;
+            setSwipeX(0);
+          }}
+          style={{
+            transform: swipeX ? `translateX(${swipeX}px)` : undefined,
+            touchAction: "pan-y",
+          }}
           className={cn(
             "px-2.5 py-1.5 text-[0.86rem] leading-[1.45] transition-colors",
             isOwn

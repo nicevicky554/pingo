@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
+import { useStatusRings } from "@/hooks/use-status-rings";
 import { cn } from "@/lib/utils";
 import {
   LogOut,
@@ -30,6 +31,7 @@ const NAV = [
   { to: "/app/updates", label: "Updates", icon: Radio },
   { to: "/app/communities", label: "Communities", icon: UsersRound },
   { to: "/app/calls", label: "Calls", icon: Phone },
+  { to: "/app/settings", label: "Settings", icon: Settings },
 ];
 
 function useUnreadChats(userId: string | undefined) {
@@ -142,23 +144,24 @@ export function AppShell({
   const { profile } = useAuth();
   const location = useLocation();
   const unreadChats = useUnreadChats(profile?.id);
+  const statusRings = useStatusRings();
+  const unseenStatuses = Object.entries(statusRings).filter(
+    ([userId, state]) => state === "unseen" && userId !== profile?.id,
+  ).length;
 
   const inConversation =
     location.pathname === "/app/chats" &&
     new URLSearchParams(location.search).has("c");
-  const isOwnProfile =
-    Boolean(profile) && location.pathname === `/app/profile/${profile?.id}`;
-  const focusedWorkflow =
-    [
-      "/app/new/message",
-      "/app/search",
-      "/app/profile/",
-      "/app/groups/",
-      "/app/channels/",
-      "/app/communities/create",
-      "/app/updates/create",
-      "/app/settings",
-    ].some((prefix) => location.pathname.startsWith(prefix)) && !isOwnProfile;
+  const focusedWorkflow = [
+    "/app/new/message",
+    "/app/search",
+    "/app/profile/",
+    "/app/groups/",
+    "/app/channels/",
+    "/app/communities/create",
+    "/app/updates/create",
+    "/app/settings/",
+  ].some((prefix) => location.pathname.startsWith(prefix));
   const hidePrimaryNav = inConversation || focusedWorkflow;
 
   return (
@@ -175,6 +178,12 @@ export function AppShell({
         <nav className="flex w-full flex-col items-center gap-0.5 px-1.5" aria-label="Primary">
           {NAV.map((item) => {
             const Icon = item.icon;
+            const badge =
+              item.to === "/app/chats"
+                ? unreadChats
+                : item.to === "/app/updates"
+                  ? unseenStatuses
+                  : 0;
             return (
               <NavLink
                 key={item.to}
@@ -188,7 +197,14 @@ export function AppShell({
                   )
                 }
               >
-                <Icon className="size-[23px]" strokeWidth={1.9} aria-hidden="true" />
+                <span className="relative">
+                  <Icon className="size-[23px]" strokeWidth={1.9} aria-hidden="true" />
+                  {badge > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[14px] rounded-full bg-primary px-1 text-center text-[0.52rem] leading-[14px] font-semibold text-primary-foreground">
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
+                </span>
                 <span>{item.label}</span>
               </NavLink>
             );
@@ -196,20 +212,6 @@ export function AppShell({
         </nav>
 
         <div className="mt-auto flex flex-col items-center gap-1.5">
-          <NavLink
-            to="/app/settings"
-            aria-label="Settings"
-            className={({ isActive }) =>
-              cn(
-                "flex size-10 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                isActive
-                  ? "bg-accent text-primary"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-              )
-            }
-          >
-            <Settings className="size-[21px]" aria-hidden="true" />
-          </NavLink>
           <ProfileMenu />
         </div>
       </aside>
@@ -234,31 +236,35 @@ export function AppShell({
 
       <nav
         className={cn(
-          "glass safe-bottom fixed inset-x-3 bottom-2 z-40 flex items-stretch justify-around rounded-2xl px-1 py-1 md:hidden",
+          "liquid-glass-nav safe-bottom fixed inset-x-3 bottom-2 z-40 flex items-stretch justify-around px-1.5 pt-1.5 md:hidden",
           hidePrimaryNav && "hidden",
         )}
         aria-label="Primary"
       >
         {NAV.map((item) => {
           const Icon = item.icon;
+          const badge =
+            item.to === "/app/chats"
+              ? unreadChats
+              : item.to === "/app/updates"
+                ? unseenStatuses
+                : 0;
           return (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl py-1.5 text-[0.58rem] font-medium transition-colors",
-                  isActive
-                    ? "bg-accent text-primary"
-                    : "text-muted-foreground active:bg-secondary",
+                  "liquid-nav-item relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-[18px] py-1.5 text-[0.56rem] font-medium",
+                  isActive && "liquid-nav-active",
                 )
               }
             >
               <span className="relative">
-                <Icon className="size-[21px]" strokeWidth={1.9} aria-hidden="true" />
-                {item.to === "/app/chats" && unreadChats > 0 && (
-                  <span className="absolute -top-1.5 -right-2.5 min-w-[15px] rounded-full bg-primary px-1 text-center text-[0.55rem] leading-[15px] font-semibold text-primary-foreground">
-                    {unreadChats > 99 ? "99+" : unreadChats}
+                <Icon className="size-[20px]" strokeWidth={1.9} aria-hidden="true" />
+                {badge > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[15px] rounded-full bg-primary px-1 text-center text-[0.55rem] leading-[15px] font-semibold text-primary-foreground shadow-sm">
+                    {badge > 99 ? "99+" : badge}
                   </span>
                 )}
               </span>
@@ -266,16 +272,6 @@ export function AppShell({
             </NavLink>
           );
         })}
-        <NavLink
-          to={profile ? `/app/profile/${profile.id}` : "/app/settings"}
-          aria-label="Your profile"
-          className="flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl py-1 text-[0.58rem] font-medium text-muted-foreground"
-        >
-          <span className="flex size-[27px] items-center justify-center">
-            <UserAvatar profile={profile} size="xs" />
-          </span>
-          <span>Profile</span>
-        </NavLink>
       </nav>
     </div>
   );

@@ -22,7 +22,9 @@ import {
   Image as ImageIcon,
   Loader2,
   Mic,
+  Pause,
   Paperclip,
+  Play,
   Send,
   Smile,
   Square,
@@ -90,7 +92,11 @@ function SelectedAttachment({
           <Paperclip className="size-5 text-muted-foreground" />
         </div>
       )}
-      <p className="truncate px-1.5 py-1 text-[0.6rem]">{file.name}</p>
+      <p className="truncate px-1.5 pt-1 text-[0.6rem]">{file.name}</p>
+      <p className="px-1.5 pb-1 text-[0.55rem] text-muted-foreground">
+        {file.type.split("/").pop()?.toUpperCase() || "FILE"} ·{" "}
+        {(file.size / 1024 / 1024).toFixed(1)} MB
+      </p>
       <button
         type="button"
         onClick={onRemove}
@@ -135,6 +141,7 @@ export function Composer({
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [recordingPaused, setRecordingPaused] = useState(false);
   const [pendingVoice, setPendingVoice] = useState<{
     blob: Blob;
     url: string;
@@ -194,6 +201,7 @@ export function Composer({
     contextRef.current = null;
     analyserRef.current = null;
     setRecording(false);
+    setRecordingPaused(false);
     setRecordSeconds(0);
     setLivePeaks([]);
     secondsRef.current = 0;
@@ -344,6 +352,42 @@ export function Composer({
     recorderRef.current?.stop();
   }
 
+  function toggleRecordingPause() {
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    if (recorder.state === "recording") {
+      recorder.pause();
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      if (sampleRef.current) window.clearInterval(sampleRef.current);
+      setRecordingPaused(true);
+      return;
+    }
+    if (recorder.state === "paused") {
+      recorder.resume();
+      setRecordingPaused(false);
+      timerRef.current = window.setInterval(() => {
+        secondsRef.current += 1;
+        setRecordSeconds(secondsRef.current);
+      }, 1000);
+      const analyser = analyserRef.current;
+      if (analyser) {
+        const buffer = new Uint8Array(analyser.fftSize);
+        sampleRef.current = window.setInterval(() => {
+          analyser.getByteTimeDomainData(buffer);
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) {
+            const value = (buffer[i] - 128) / 128;
+            sum += value * value;
+          }
+          const rms = Math.sqrt(sum / buffer.length);
+          const peak = Math.min(100, Math.max(4, Math.round(rms * 320)));
+          peaksRef.current = [...peaksRef.current.slice(-(BAR_COUNT - 1)), peak];
+          setLivePeaks([...peaksRef.current]);
+        }, 120);
+      }
+    }
+  }
+
   const attachments = [
     { label: "Photos", icon: ImageIcon, ref: imageInput, accept: "image/*" },
     {
@@ -393,7 +437,6 @@ export function Composer({
         ref={imageInput}
         type="file"
         accept="image/*"
-        multiple
         className="hidden"
         onChange={pickFiles}
       />
@@ -564,6 +607,20 @@ export function Composer({
                   />
                 ))}
           </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            onClick={toggleRecordingPause}
+            type="button"
+            aria-label={recordingPaused ? "Resume recording" : "Pause recording"}
+          >
+            {recordingPaused ? (
+              <Play className="size-3.5" />
+            ) : (
+              <Pause className="size-3.5" />
+            )}
+          </Button>
           <Button
             variant="ghost"
             size="sm"

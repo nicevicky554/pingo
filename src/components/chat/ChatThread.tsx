@@ -31,7 +31,7 @@ import {
 import { dayLabel, lastSeenLabel, timeOf } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 import { freshPrivateChannel } from "@/lib/realtime";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import type {
   ConversationMember,
   ConversationSummary,
@@ -41,6 +41,7 @@ import type {
 import { usePresence } from "@/providers/PresenceProvider";
 import { useCall } from "@/providers/CallProvider";
 import { useAuth } from "@/hooks/use-auth";
+import { useStatusRings } from "@/hooks/use-status-rings";
 import { cn } from "@/lib/utils";
 import {
   Archive,
@@ -99,6 +100,8 @@ export function ChatThread({
   const { online } = usePresence();
   const { startCall } = useCall();
   const { settings } = useAuth();
+  const statusRings = useStatusRings();
+  const navigate = useNavigate();
   const receiptsEnabled = settings?.read_receipts !== false;
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -673,13 +676,34 @@ export function ChatThread({
           <ArrowLeft className="size-5" />
         </Button>
 
-        {(isGroup || peer) ? (
-          <Link
-            to={isGroup ? `/app/groups/${conversation.id}` : `/app/profile/${peer!.id}`}
-            aria-label={isGroup ? "Open group info" : `Open ${title}'s profile`}
-          >
-            <UserAvatar profile={avatarProfile} size="md" showPresence={!isGroup} />
+        {isGroup ? (
+          <Link to={`/app/groups/${conversation.id}`} aria-label="Open group info">
+            <UserAvatar profile={avatarProfile} size="md" showPresence={false} />
           </Link>
+        ) : peer ? (
+          <button
+            type="button"
+            aria-label={
+              statusRings[peer.id]
+                ? `View ${title}'s status`
+                : `Open ${title}'s profile`
+            }
+            className="rounded-full"
+            onClick={() =>
+              navigate(
+                statusRings[peer.id]
+                  ? `/app/updates?statusUser=${peer.id}`
+                  : `/app/profile/${peer.id}`,
+              )
+            }
+          >
+            <UserAvatar
+              profile={avatarProfile}
+              size="md"
+              showPresence
+              ring={statusRings[peer.id] ?? null}
+            />
+          </button>
         ) : (
           <UserAvatar profile={avatarProfile} size="md" showPresence={false} />
         )}

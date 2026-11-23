@@ -10,7 +10,9 @@ import {
   Hash,
   Loader2,
   PenSquare,
+  Settings2,
   Share2,
+  UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -39,6 +41,7 @@ export default function ChannelPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [myRole, setMyRole] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!channelId) return;
@@ -70,11 +73,12 @@ export default function ChannelPage() {
     if (profile) {
       const { data: membership } = await supabase
         .from("channel_members")
-        .select("user_id")
+        .select("user_id,role")
         .eq("channel_id", channelId)
         .eq("user_id", profile.id)
         .maybeSingle();
       setFollowing(Boolean(membership));
+      setMyRole(membership?.role ?? null);
     }
     setLoading(false);
   }, [channelId, profile]);
@@ -142,6 +146,7 @@ export default function ChannelPage() {
   }
 
   const isOwner = profile?.id === channel.owner_id;
+  const canManage = isOwner || myRole === "owner" || myRole === "admin";
 
   return (
     <div className="page-enter min-h-0 flex-1 overflow-y-auto bg-background">
@@ -174,7 +179,7 @@ export default function ChannelPage() {
         </div>
 
         <div className="mt-5 flex gap-2">
-          {isOwner ? (
+          {canManage ? (
             <Button
               className="flex-1 gap-2"
               onClick={() => navigate(`/app/channels/${channel.id}/compose`)}
@@ -195,7 +200,38 @@ export default function ChannelPage() {
           <Button variant="outline" size="icon" onClick={() => void share()} aria-label="Share channel">
             <Share2 className="size-4" />
           </Button>
+          {canManage && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate(`/app/channels/${channel.id}/subscribers`)}
+              aria-label="Manage subscribers"
+            >
+              <UsersRound className="size-4" />
+            </Button>
+          )}
         </div>
+
+        {canManage && (
+          <div className="mt-2 flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5"
+              onClick={() => navigate(`/app/channels/${channel.id}/admins`)}
+            >
+              <Settings2 className="size-3.5" /> Administrators
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5"
+              onClick={() => navigate(`/app/channels/${channel.id}/subscribers`)}
+            >
+              <UsersRound className="size-3.5" /> Subscribers
+            </Button>
+          </div>
+        )}
 
         {error && (
           <p className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs text-muted-foreground">
@@ -209,11 +245,11 @@ export default function ChannelPage() {
               <Hash className="mx-auto size-6 text-muted-foreground" />
               <p className="mt-3 text-sm font-medium">No posts yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {isOwner
+                {canManage
                   ? "Publish the first post from the channel composer."
                   : "Posts from this channel will appear here."}
               </p>
-              {isOwner && (
+              {canManage && (
                 <Button
                   size="sm"
                   className="mt-4"

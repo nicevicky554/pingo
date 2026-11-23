@@ -39,17 +39,17 @@ export function SetupNotice() {
                 supabase db push
               </code>
               . They create the schema, RLS policies, storage buckets, realtime
-              authorization and the admin-controlled test/live sign-in switch.
+              authorization and the branding RPC.
             </span>
           </li>
           <li className="flex gap-3">
             <ExternalLink className="mt-0.5 size-4 shrink-0 text-primary" />
             <span>
-              For the default test mode, enable <strong>Anonymous sign-ins</strong>{" "}
-              in Supabase → Authentication → Providers. No SMS is sent and any
-              six-digit code signs a tester in. For real codes, also enable the{" "}
-              <strong>Phone</strong> provider and an SMS provider, then switch to
-              live mode in the admin console.
+              Enable the <strong>Phone</strong> provider and an SMS provider,
+              then disable <strong>Anonymous sign-ins</strong>. Testers use fixed
+              numbers configured under Authentication → Phone → Test phone
+              numbers; those are real Supabase users. PINGO never accepts an
+              arbitrary six-digit code.
             </span>
           </li>
         </ol>

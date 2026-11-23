@@ -22,25 +22,25 @@ Convex dependency.
    - `supabase/migrations/0001_pingo_core.sql`
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
    - `supabase/migrations/0003_media_waveforms.sql`
-       - `supabase/migrations/0004_terms_acceptance.sql`
-    - `supabase/migrations/0005_disable_rls.sql` (owner-requested RLS removal)
-    - `supabase/migrations/0006_public_branding.sql`
+   - `supabase/migrations/0004_terms_acceptance.sql`
+   - `supabase/migrations/0006_public_branding.sql`
+   - `supabase/migrations/0007_restore_rls.sql`
+   - `supabase/migrations/0008_phone_auth_only.sql`
 
-    `0005` disables RLS and drops every policy in `public`, `storage.objects`
-    and `realtime.messages`. Anyone with the anon key can then read and write
-    exposed data. If you have not explicitly accepted that, stop and keep 0005
-    unapplied. `supabase/remove-rls.sql` is the same script for the SQL editor.
+    Migration 0007 enables RLS and recreates all public, Storage and Realtime
+    policies. Normal browser requests use the publishable key and the user's
+    JWT. Do not add a `VITE_` secret key and do not disable RLS for convenience.
 
 4. **Authentication → Providers**
-   - **Test mode (default):** enable **Anonymous sign-ins**.
-   - **Live SMS:** enable **Phone**, connect an SMS provider (Twilio, Vonage,
-     MessageBird, …), and add your production URL under
-     **Authentication → URL Configuration → Redirect URLs**.
+   - Enable **Phone** and connect an SMS provider (Twilio, Vonage,
+     MessageBird, …).
+   - **Disable Anonymous sign-ins.** PINGO never calls anonymous auth.
+   - For testers, add fixed numbers and codes under **Authentication → Phone →
+     Test phone numbers**; these create real Supabase users.
+   - Add your production URL under **Authentication → URL Configuration →
+     Redirect URLs**.
 5. Create the first administrator: sign in, visit `/admin/setup`, claim the
    super-admin role. The RPC is bootstrap-only and audited.
-6. Sign-in mode is switched only from `/admin/settings`; every change is written
-   to the audit log. Test mode never sends SMS and accepts any six-digit code.
-   Do not leave it enabled for a public launch.
 
 ## 2. Environment variables
 
@@ -53,7 +53,9 @@ Preview and Development.
 | `VITE_SUPABASE_URL` | client | yes | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | client | yes | Public anon/publishable key |
 | `SUPABASE_URL` | server | yes | Same URL, used by `/api/turn` to verify sessions |
-| `SUPABASE_ANON_KEY` | server | yes | Same anon key, used server-side |
+| `SUPABASE_PUBLISHABLE_KEY` | server | optional | Server-side publishable key alias |
+| `SUPABASE_SECRET_KEY` | server only | optional | Privileged server key; never expose to Vite |
+| `SUPABASE_ANON_KEY` | server | yes | Legacy alias for the publishable key |
 | `TWILIO_ACCOUNT_SID` | server | for TURN | Twilio account identifier |
 | `TWILIO_API_KEY` | server | for TURN | Twilio API Key SID |
 | `TWILIO_API_SECRET` | server | for TURN | Twilio API Key secret |
@@ -146,7 +148,7 @@ bun tsc -b --noEmit
 
 Then, with a real Supabase project:
 
-- Sign in in test mode; refresh; confirm the session is restored.
+- Sign in with a configured phone number; refresh; confirm the same user ID and session are restored.
 - Sign out and back in; confirm notifications are not duplicated and the
   previous account's notifications disappear.
 - Send messages between two accounts; check typing, read receipts and attachments.

@@ -24,6 +24,7 @@ import {
   Eye,
   ImagePlus,
   Loader2,
+  Lock,
   MessageCircle,
   Plus,
   Radio,
@@ -32,7 +33,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 const BACKGROUNDS = [
   "#126B78",
@@ -109,6 +110,7 @@ export default function UpdatesPage() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [viewerGroup, setViewerGroup] = useState<StatusGroup | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -201,6 +203,24 @@ export default function UpdatesPage() {
       .sort((a, b) => Number(a.allSeen) - Number(b.allSeen));
   }, [statuses, profile?.id, profiles, viewed]);
 
+  useEffect(() => {
+    const requested = searchParams.get("statusUser");
+    if (!requested || !profile) return;
+    const target =
+      requested === profile.id
+        ? mine.length > 0
+          ? { profile, statuses: mine, allSeen: true }
+          : null
+        : groups.find((group) => group.profile.id === requested) ?? null;
+    if (target) {
+      setViewerGroup(target);
+      setViewerIndex(0);
+      setSearchParams({}, { replace: true });
+    } else if (!loading) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [groups, loading, mine, profile, searchParams, setSearchParams]);
+
   async function recordView(status: StatusUpdate) {
     if (!profile || viewed.has(status.id)) return;
     setViewed((current) => new Set(current).add(status.id));
@@ -253,14 +273,31 @@ export default function UpdatesPage() {
             Statuses and channels, live for 24 hours
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="ml-auto gap-1.5"
-          onClick={() => navigate("/app/updates/create")}
-        >
-          <Plus className="size-4" /> Add status
-        </Button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-9 text-muted-foreground"
+            asChild
+            aria-label="Status privacy"
+          >
+            <Link to="/app/settings/privacy">
+              <Lock className="size-4" />
+            </Link>
+          </Button>
+          <Button size="sm" variant="outline" className="gap-1.5" asChild>
+            <Link to="/app/channels">
+              <Radio className="size-4" /> Channels
+            </Link>
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => navigate("/app/updates/create")}
+          >
+            <Plus className="size-4" /> Add status
+          </Button>
+        </div>
       </header>
 
       <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">

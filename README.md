@@ -21,13 +21,14 @@ page.
 2. Add these variables in the project's **Keys** tab:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY` (the publishable anon key — never the service role key)
-3. Apply both migrations in order:
+3. Apply the migrations in order:
    - `supabase/migrations/0001_pingo_core.sql`
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
    - `supabase/migrations/0003_media_waveforms.sql`
    - `supabase/migrations/0004_terms_acceptance.sql`
-   - `supabase/migrations/0005_disable_rls.sql`
    - `supabase/migrations/0006_public_branding.sql`
+   - `supabase/migrations/0007_restore_rls.sql`
+   - `supabase/migrations/0008_phone_auth_only.sql`
 
    With the Supabase CLI:
 
@@ -37,21 +38,21 @@ page.
    ```
 
    These create every table, index, trigger, view, RPC, storage bucket and
-   notification trigger, then remove RLS and publish the branding RPC.
+   notification trigger. Migration 0007 enables RLS on every public table and
+   recreates the profile, conversation, group, channel, status, call, admin,
+   Storage and Realtime policies. Migration 0008 removes the legacy auth-mode
+   switch.
 
-   **Owner-directed security change:** migration 0005 drops every RLS policy
-   and disables RLS on `public`, `storage.objects` and `realtime.messages`. That
-   means the anon key can read and write all exposed data. The owner explicitly
-   accepted this. Admin operations still check `is_admin()` inside
-   security-definer RPCs, but the client-side admin route guard is not a
-   database boundary once 0005 has been applied.
-4. For **test sign-in** (the default), enable **Anonymous sign-ins** in
-   Supabase → Authentication → Providers. Test mode sends no SMS; any six-digit
-   code signs a tester in. Each browser profile becomes one test account, so do
-   not sign out unless you intend to start a fresh account.
-5. For **live SMS**, enable the **Phone** provider and connect an SMS provider
-   (Twilio, MessageBird, Vonage, etc.). Then switch the mode in
-   `/admin/settings` → Phone sign-in codes → Live SMS.
+   **Security:** RLS stays enabled for normal users. The browser uses only the
+   publishable key. Never create `VITE_SUPABASE_SECRET_KEY`; a secret key may be
+   used only inside a trusted server process that separately verifies the
+   caller's access token. Anonymous Supabase sign-in must be disabled in the
+   dashboard; PINGO no longer calls it.
+4. Enable the **Phone** provider and connect an SMS provider (Twilio,
+   MessageBird, Vonage, etc.). **Disable Anonymous sign-ins.**
+5. To test with two accounts, configure two fixed numbers and codes under
+   **Authentication → Phone → Test phone numbers**. Those are real Supabase
+   Auth users; PINGO does not accept arbitrary codes.
 6. Optionally enable email confirmations for recovery addresses.
 7. Visit `/admin/setup` while signed in and claim super admin. The bootstrap RPC
    works only while no administrator exists and writes an audit entry.
@@ -68,11 +69,10 @@ setup, and [`env.example`](./env.example) for the full list.
 - Supabase client, session provider, profile/bootstrap trigger fallback.
 - Phone-first authentication: searchable country selector, dial codes, SMS OTP,
   resend timer, friendly error messages.
-- **Admin-controlled sign-in mode:** `/admin/settings` switches between **Test**
-  (default, no SMS, any six digits, anonymous Supabase session) and **Live SMS**
-  (real codes through Supabase + your SMS provider). The switch is a
-  security-definer RPC with an audit entry; the client reads the mode from the
-  database before showing the code step.
+- **Phone OTP only:** Supabase Phone Auth creates a real user on the first
+  verified code and restores the same `auth.users` row later. There is no app
+  test-mode switch, no anonymous session and no arbitrary-code acceptance. Test
+  numbers are configured in the Supabase dashboard.
 - Onboarding: unique `@username` check against the database, display name,
   optional profile photo upload, cropping, contact picker and an explicit
   agreement step that records the accepted policy version and timestamp.
@@ -91,8 +91,8 @@ setup, and [`env.example`](./env.example) for the full list.
 
 ### Phase 2 — core messaging
 
-- Real conversations and messages in Postgres. RLS is disabled by owner request
-  (migration 0005).
+- Real conversations and messages in Postgres, with RLS enabled (migration
+  0007). Browser access is scoped to the signed-in user's JWT.
 - Realtime inserts/updates through private `conversation:<id>` channels.
 - Typing indicators over Supabase Broadcast: throttled, expire after 3.5s,
   stopped on send/disconnect; glass capsule and header “Typing…” state.
@@ -202,8 +202,8 @@ setup, and [`env.example`](./env.example) for the full list.
   `claim_super_admin()`.
 - Storage buckets: `avatars` (public), `profile-photos` (private), `media`
   (private, conversation-scoped), `status-media` (private), `channel-media`.
-- Realtime publication and private conversation/presence topics. Migration 0005
-  removes the Realtime authorization policies along with all other RLS policies.
+- Realtime publication and private conversation/presence/user topics. Migration
+  0007 restores the Realtime authorization policies.
 
 ## 4. Honest gaps (not claimed as finished)
 
@@ -214,13 +214,13 @@ or absent.
    calls need LiveKit or another SFU and are disabled with an explanation. TURN
    is wired through `/api/turn` but requires Twilio credentials before it can
    relay media across strict NATs.
-2. **End-to-end encryption.** PINGO does not claim E2EE. Transport is TLS and
-   access depends on application code, not RLS or the Signal protocol. Migration
-   0005 makes every exposed row readable with the anon key; this is deliberate.
+2. **End-to-end encryption.** PINGO does not claim E2EE. Transport is TLS;
+   normal browser access is constrained by the RLS policies restored in 0007.
 3. **Push notifications.** In-app and browser notifications work while the app is
    running; FCM/APNs and a Web Push service worker for closed apps are not built.
-4. **Test sign-in is insecure by design.** It uses anonymous Supabase sessions
-   gated by the admin switch. Do not leave test mode on for a public launch.
+4. **Supabase test phone numbers.** Fixed test numbers/codes are configured in
+   Supabase and still produce real auth users. They must be removed before a
+   public launch.
 5. **Offline queue / IndexedDB cache.** Not implemented; the app shows an offline
    banner and relies on realtime reconnect.
 6. **Mobile apps (Phase 9).** No Expo project exists yet.
@@ -260,11 +260,11 @@ or absent.
 - `api/turn.ts` compiles with `bun build --target=node`; `vercel.json` parses as
   valid JSON.
 - Convex packages, config and generated code removed; `bun install` clean.
-- Migrations 0001–0006 were written but **not executed** against a live Supabase project
+- Migrations 0001–0008 were written but **not executed** against a live Supabase project
   because no credentials are configured on this host. Apply them before expecting
   sign-in or messaging to work.
 - No Supabase project, TURN account, browser session, camera/microphone or second
-  tester is available on this host. Test-mode sign-in, OTP, profile upload,
+  tester is available on this host. Phone OTP, profile upload,
   messaging, typing, voice waveforms, notification realtime, TURN relay and
   WebRTC calls have **not** been executed. TypeScript passing is not runtime
   proof.
@@ -301,6 +301,6 @@ src/
 api/
   turn.ts           verified, short-lived TURN credentials
 supabase/
-  migrations/       0001_pingo_core.sql … 0006_public_branding.sql
-  remove-rls.sql    standalone copy of 0005 for the Supabase SQL editor
+  migrations/       0001_pingo_core.sql … 0008_phone_auth_only.sql
+                    (0006 branding, 0007 RLS restoration, 0008 phone-only auth)
 ```

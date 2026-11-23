@@ -6,6 +6,7 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
+import { useStatusRings } from "@/hooks/use-status-rings";
 import { listConversations, listMembers, searchMessages } from "@/lib/chat";
 import { watchChannel } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
@@ -31,7 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 type MemberWithProfile = ConversationMember & { profile: Profile | null };
 type MessageHit = {
@@ -58,6 +59,8 @@ export default function ChatsPage() {
   const { profile, settings } = useAuth();
   const profileId = profile?.id;
   const receiptsEnabled = settings?.read_receipts !== false;
+  const statusRings = useStatusRings();
+  const navigate = useNavigate();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [lastReceipts, setLastReceipts] = useState<Record<string, "delivered" | "read">>(
     {},
@@ -360,24 +363,54 @@ export default function ChatsPage() {
                       : ""
                   : "";
 
+                const ring = !isGroup && peer ? statusRings[peer.id] ?? null : null;
+
                 return (
-                  <button
+                  <div
                     key={conversation.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => {
                       setActiveId(conversation.id);
                       setSearchParams({ c: conversation.id }, { replace: true });
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setActiveId(conversation.id);
+                        setSearchParams({ c: conversation.id }, { replace: true });
+                      }
+                    }}
                     className={cn(
-                      "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/70",
+                      "flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/70",
                       activeId === conversation.id && "bg-secondary",
                     )}
                   >
-                    <UserAvatar
-                      profile={avatar}
-                      size="md"
-                      showPresence={!isGroup}
-                    />
+                    <button
+                      type="button"
+                      aria-label={
+                        ring
+                          ? `View ${title}'s status`
+                          : `Open ${title}'s profile`
+                      }
+                      className="shrink-0 rounded-full"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!peer) return;
+                        navigate(
+                          ring
+                            ? `/app/updates?statusUser=${peer.id}`
+                            : `/app/profile/${peer.id}`,
+                        );
+                      }}
+                    >
+                      <UserAvatar
+                        profile={avatar}
+                        size="md"
+                        showPresence={!isGroup}
+                        ring={ring}
+                      />
+                    </button>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-2">
                         <p className="min-w-0 flex-1 truncate text-[0.86rem] font-semibold">
@@ -428,7 +461,7 @@ export default function ChatsPage() {
                         )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
 

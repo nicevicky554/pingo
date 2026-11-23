@@ -62,6 +62,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(created ?? null);
     } else {
       setProfile(ownProfile);
+      const verifiedPhone = activeSession.user.phone ?? null;
+      if (verifiedPhone && ownProfile.phone !== verifiedPhone) {
+        // Auth owns proof of the number; mirror it into the app profile.
+        const { data: synced } = await supabase
+          .from("profiles")
+          .update({ phone: verifiedPhone })
+          .eq("id", uid)
+          .select("*")
+          .maybeSingle<Profile>();
+        if (synced) setProfile(synced);
+      }
     }
 
     const { data: ownSettings } = await supabase
@@ -145,6 +156,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setSettings(null);
     setAdminRole(null);
+    // Clear only local app state; messages and the account stay in Supabase.
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (const key of Object.keys(storage)) {
+        if (key.startsWith("pingo:") || key.startsWith("sb-")) {
+          storage.removeItem(key);
+        }
+      }
+    }
   }, []);
 
   const value = useMemo<AuthContextValue>(

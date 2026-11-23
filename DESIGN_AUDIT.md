@@ -38,36 +38,38 @@ These are not represented by fake controls:
 
 ## Verification
 
-`bun tsc -b --noEmit` passes. No Supabase project, two testers, camera/microphone or TURN account were available on this host, so runtime flows are **not** claimed as tested. Apply migrations 0001–0006 before exercising the app.
+`bun tsc -b --noEmit` passes. No Supabase project, two testers, camera/microphone or TURN account were available on this host, so runtime flows are **not** claimed as tested. Apply migrations 0001–0008 before exercising the app.
 
-## Owner-directed RLS removal and follow-up
+## Latest implementation pass
 
-- `supabase/migrations/0005_disable_rls.sql` (and `supabase/remove-rls.sql`)
-  drops every policy and disables RLS in `public`, Storage and Realtime. This is
-  a deliberate, explicitly requested security reduction: the anon key can read
-  and write exposed data. Do not apply it unless that is understood.
-- `0006_public_branding.sql` adds public branding read plus an admin-checked
-  publish RPC. `/admin/branding` uploads app icon, light/dark logos, splash
-  assets and default group/channel/community/user images to Storage, previews
-  them, then publishes to `platform_settings`.
-- The splash now reads the published splash icon/background and shows only the
-  mark, wordmark and three subtle loading dots. No “Opening PINGO…” label or fake
-  progress bar remains.
-- Primary mobile navigation is hidden in chats (`?c=`), search, new message,
-  group/channel/community creation and detail, status creation, other-user
-  profiles and all settings pages. Chats rows now write `?c=` so back navigation
-  and nav visibility agree. The Chats bell and floating plus are removed; the
-  compact header compose control opens the four creation routes.
-- Chats navigation shows a real summed unread badge from `conversation_list`,
-  refreshed on message inserts. Chat rows and bubbles share receipt semantics:
-  one tick = stored, two muted = a real recipient delivery receipt, teal two =
-  read (group read requires every other member). Recipient devices upsert a
-  delivery receipt even when read receipts are disabled.
-- Settings is now a list home at `/app/settings` with dedicated
-  `/app/settings/{profile,account,privacy,security,notifications,appearance,about}`
-  pages. Own profile and settings summary show the verified phone number.
+- RLS is enabled again by `0007_restore_rls.sql`; every public table, Storage
+  object and Realtime topic gets an explicit policy. The browser uses only the
+  publishable key. `0008_phone_auth_only.sql` removes the old auth-mode switch.
+- Authentication is Supabase Phone OTP only. There is no anonymous session and
+  no in-app arbitrary-code path. Existing users keep the same `auth.users` ID;
+  the verified phone is mirrored into `profiles.phone`.
+- Navigation is now Chats, Updates, Communities, Calls and Settings. Profile is
+  not a tab. Mobile uses a layered Liquid Glass bar with safe-area padding and a
+  raised active surface; desktop keeps the compact rail.
+- Settings has a list home plus account, privacy, security, devices, chats,
+  notifications, storage, appearance, help and about pages, with Log out at the
+  bottom. Detail pages hide the primary navigation.
+- Active statuses now produce green/teal rings in the Chats list, chat header and
+  profile page. Tapping an avatar with a status opens the full-screen status
+  viewer; tapping a name opens the profile.
+- Dedicated channel discovery, administrator and subscriber pages were added at
+  `/app/channels`, `/app/channels/:id/admins` and `/app/channels/:id/subscribers`.
+- Swipe-right reply was added to message bubbles; long-press/right-click actions
+  remain.
+- The photo picker now opens a single-photo preview with caption/remove before
+  sending, rather than treating an image as an immediate attachment.
 
-Still not implemented: multi-select media tray with per-item editor, camera
-capture screen, contacts/location attachments, full admin modules, community
-detail page, channel admin/invite screens, session revocation RPC, and runtime
-tests. These are not represented as working controls.
+Still not implemented: group topics, channel discussion groups, per-post
+comments, View Once, blurred media auto-download preferences, camera capture
+review screen, storage/device revocation RPC, and full admin modules. These are
+not represented as working controls.
+
+## Historical note
+
+An earlier owner request removed RLS. That file was deleted; the current product
+requires and restores RLS for normal users.

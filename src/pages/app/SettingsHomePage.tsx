@@ -1,17 +1,23 @@
 import { UserAvatar } from "@/components/UserAvatar";
 import { PageHeader } from "@/components/app/PageHeader";
 import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
 import {
   Bell,
   ChevronRight,
+  HardDrive,
+  HelpCircle,
   Info,
   LockKeyhole,
+  LogOut,
+  MessageSquare,
   Palette,
   ShieldCheck,
+  Smartphone,
   UserRound,
   WalletCards,
 } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 const SECTIONS = [
   {
@@ -34,9 +40,27 @@ const SECTIONS = [
   },
   {
     to: "/app/settings/security",
-    label: "Security and devices",
-    description: "Active session, read receipts and sign-out controls",
+    label: "Security",
+    description: "Account protection and sign-out controls",
     icon: ShieldCheck,
+  },
+  {
+    to: "/app/settings/devices",
+    label: "Devices and sessions",
+    description: "This session, connected devices and account activity",
+    icon: Smartphone,
+  },
+  {
+    to: "/app/settings/chats",
+    label: "Chats",
+    description: "Wallpaper, message text size and previews",
+    icon: MessageSquare,
+  },
+  {
+    to: "/app/settings/storage",
+    label: "Storage and data",
+    description: "Browser storage usage and local cache",
+    icon: HardDrive,
   },
   {
     to: "/app/settings/notifications",
@@ -51,15 +75,22 @@ const SECTIONS = [
     icon: Palette,
   },
   {
+    to: "/app/settings/help",
+    label: "Help and support",
+    description: "Policies, guidelines and contact support",
+    icon: HelpCircle,
+  },
+  {
     to: "/app/settings/about",
     label: "About PINGO",
-    description: "Version, policies and support",
+    description: "Version, account ID and backend information",
     icon: Info,
   },
 ];
 
 export default function SettingsHomePage() {
-  const { profile, session } = useAuth();
+  const { profile, session, signOut } = useAuth();
+  const navigate = useNavigate();
   if (!profile) return null;
 
   return (
@@ -109,6 +140,20 @@ export default function SettingsHomePage() {
               </Link>
             );
           })}
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
+          <Button
+            variant="ghost"
+            className="h-12 w-full justify-start gap-3 rounded-none px-4 text-destructive hover:text-destructive"
+            onClick={() => {
+              if (!window.confirm("Sign out of PINGO on this device?")) return;
+              void signOut().then(() => navigate("/", { replace: true }));
+            }}
+          >
+            <LogOut className="size-[18px]" />
+            Log out
+          </Button>
         </div>
 
         <p className="mt-6 text-center text-[0.68rem] leading-5 text-muted-foreground">
