@@ -32,10 +32,42 @@ These are not represented by fake controls:
 - Status drawing, stickers, video trimming. The editor supports text, photo, video, caption, background and audience; unsupported tools are absent rather than decorative.
 - Push notifications for closed apps.
 - Group/channel editing beyond schema-supported fields.
-- Administrator-managed global branding assets. The app mark is still a shared component; a branding uploader was not added because it would not yet be consumed consistently.
-- Dedicated `/settings/*` pages and full admin module expansion.
-- Language switching.
+- Full admin module expansion (conversations, communities, calls, moderation).
+- Language switching. Storage/language settings categories are omitted because
+  they have no working backend rather than shown as dead rows.
 
 ## Verification
 
-`bun tsc -b --noEmit` passes. No Supabase project, two testers, camera/microphone or TURN account were available on this host, so runtime flows are **not** claimed as tested. Apply migrations 0001–0004 before exercising the app.
+`bun tsc -b --noEmit` passes. No Supabase project, two testers, camera/microphone or TURN account were available on this host, so runtime flows are **not** claimed as tested. Apply migrations 0001–0006 before exercising the app.
+
+## Owner-directed RLS removal and follow-up
+
+- `supabase/migrations/0005_disable_rls.sql` (and `supabase/remove-rls.sql`)
+  drops every policy and disables RLS in `public`, Storage and Realtime. This is
+  a deliberate, explicitly requested security reduction: the anon key can read
+  and write exposed data. Do not apply it unless that is understood.
+- `0006_public_branding.sql` adds public branding read plus an admin-checked
+  publish RPC. `/admin/branding` uploads app icon, light/dark logos, splash
+  assets and default group/channel/community/user images to Storage, previews
+  them, then publishes to `platform_settings`.
+- The splash now reads the published splash icon/background and shows only the
+  mark, wordmark and three subtle loading dots. No “Opening PINGO…” label or fake
+  progress bar remains.
+- Primary mobile navigation is hidden in chats (`?c=`), search, new message,
+  group/channel/community creation and detail, status creation, other-user
+  profiles and all settings pages. Chats rows now write `?c=` so back navigation
+  and nav visibility agree. The Chats bell and floating plus are removed; the
+  compact header compose control opens the four creation routes.
+- Chats navigation shows a real summed unread badge from `conversation_list`,
+  refreshed on message inserts. Chat rows and bubbles share receipt semantics:
+  one tick = stored, two muted = a real recipient delivery receipt, teal two =
+  read (group read requires every other member). Recipient devices upsert a
+  delivery receipt even when read receipts are disabled.
+- Settings is now a list home at `/app/settings` with dedicated
+  `/app/settings/{profile,account,privacy,security,notifications,appearance,about}`
+  pages. Own profile and settings summary show the verified phone number.
+
+Still not implemented: multi-select media tray with per-item editor, camera
+capture screen, contacts/location attachments, full admin modules, community
+detail page, channel admin/invite screens, session revocation RPC, and runtime
+tests. These are not represented as working controls.

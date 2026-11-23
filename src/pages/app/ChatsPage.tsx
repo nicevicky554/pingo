@@ -1,7 +1,6 @@
 import { ChatThread } from "@/components/chat/ChatThread";
 import { CreateMenu } from "@/components/chat/CreateMenu";
 import { NewChatDialog } from "@/components/chat/NewChatDialog";
-import { NotificationsMenu } from "@/components/NotificationsMenu";
 import { PingoMark } from "@/components/Wordmark";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
@@ -20,6 +19,7 @@ import type {
 import { cn } from "@/lib/utils";
 import {
   BellOff,
+  Check,
   CheckCheck,
   Loader2,
   MessageSquare,
@@ -27,6 +27,7 @@ import {
   Plus,
   Radio,
   Search,
+  SquarePen,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -54,9 +55,13 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function ChatsPage() {
-  const { profile } = useAuth();
+  const { profile, settings } = useAuth();
   const profileId = profile?.id;
+  const receiptsEnabled = settings?.read_receipts !== false;
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [lastReceipts, setLastReceipts] = useState<Record<string, "delivered" | "read">>(
+    {},
+  );
   const [members, setMembers] = useState<Record<string, MemberWithProfile[]>>({});
   const [channels, setChannels] = useState<Channel[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -68,7 +73,7 @@ export default function ChatsPage() {
   const [hits, setHits] = useState<MessageHit[]>([]);
   const [searching, setSearching] = useState(false);
   const refreshTimer = useRef<number | null>(null);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const conversationParam = searchParams.get("c");
 
   const load = useCallback(async () => {
@@ -76,6 +81,25 @@ export default function ChatsPage() {
     try {
       const list = await listConversations(profileId);
       setConversations(list);
+
+      const lastIds = list
+        .map((item) => item.last_message?.id)
+        .filter((id): id is string => Boolean(id));
+      if (lastIds.length > 0) {
+        const { data: receiptRows } = await supabase
+          .from("message_receipts")
+          .select("message_id,status")
+          .in("message_id", lastIds);
+        const best: Record<string, "delivered" | "read"> = {};
+        for (const row of receiptRows ?? []) {
+          const receipt = row as { message_id: string; status: string };
+          if (receipt.status === "read") best[receipt.message_id] = "read";
+          else if (!best[receipt.message_id]) best[receipt.message_id] = "delivered";
+        }
+        setLastReceipts(best);
+      } else {
+        setLastReceipts({});
+      }
       const { members: rows } = await listMembers(list.map((item) => item.id));
       const grouped: Record<string, MemberWithProfile[]> = {};
       for (const row of rows) {
@@ -212,21 +236,18 @@ export default function ChatsPage() {
           >
             <Search className="size-[20px]" />
           </Link>
-          <NotificationsMenu compact />
-          <div className="hidden md:block">
-            <CreateMenu
-              trigger={
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-9 text-muted-foreground"
-                  aria-label="New conversation"
-                >
-                  <Plus className="size-[21px]" />
-                </Button>
-              }
-            />
-          </div>
+          <CreateMenu
+            trigger={
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-9 text-muted-foreground"
+                aria-label="New conversation"
+              >
+                <SquarePen className="size-[20px]" />
+              </Button>
+            }
+          />
         </header>
 
         <div className="px-3 pb-2">
@@ -343,7 +364,10 @@ export default function ChatsPage() {
                   <button
                     key={conversation.id}
                     type="button"
-                    onClick={() => setActiveId(conversation.id)}
+                    onClick={() => {
+                      setActiveId(conversation.id);
+                      setSearchParams({ c: conversation.id }, { replace: true });
+                    }}
                     className={cn(
                       "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-secondary/70",
                       activeId === conversation.id && "bg-secondary",
@@ -374,9 +398,14 @@ export default function ChatsPage() {
                         {conversation.pinned && (
                           <Pin className="size-3 shrink-0 text-muted-foreground" />
                         )}
-                        {last?.sender_id === profile.id && (
-                          <CheckCheck className="size-3.5 shrink-0 text-primary" />
-                        )}
+                        {last?.sender_id === profile.id &&
+                          (lastReceipts[last.id] === "read" && receiptsEnabled ? (
+                            <CheckCheck className="size-3.5 shrink-0 text-primary" />
+                          ) : lastReceipts[last.id] ? (
+                            <CheckCheck className="size-3.5 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <Check className="size-3.5 shrink-0 text-muted-foreground" />
+                          ))}
                         <p
                           className={cn(
                             "min-w-0 flex-1 truncate text-[0.78rem]",
@@ -480,7 +509,10 @@ export default function ChatsPage() {
             members={members[active.id] ?? []}
             currentUserId={profile.id}
             currentProfile={profile}
-            onBack={() => setActiveId(null)}
+            onBack={() => {
+              setActiveId(null);
+              setSearchParams({}, { replace: true });
+            }}
             onChanged={() => void load()}
           />
         ) : (
@@ -497,26 +529,13 @@ export default function ChatsPage() {
         )}
       </div>
 
-      <div className="fixed right-4 bottom-[88px] z-30 md:hidden">
-        <CreateMenu
-          trigger={
-            <button
-              type="button"
-              aria-label="New conversation"
-              className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/30 active:scale-95"
-            >
-              <Plus className="size-5" />
-            </button>
-          }
-        />
-      </div>
-
       <NewChatDialog
         open={newChatOpen}
         onOpenChange={setNewChatOpen}
         currentUserId={profile.id}
         onOpenConversation={(id) => {
           setActiveId(id);
+          setSearchParams({ c: id }, { replace: true });
           void load();
         }}
       />

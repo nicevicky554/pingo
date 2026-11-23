@@ -154,6 +154,23 @@ export async function markConversationRead(
     .eq("conversation_id", conversationId)
     .eq("user_id", userId);
 
+  // A device that has received the row can honestly acknowledge delivery even
+  // when the reader has turned read receipts off.
+  const delivered = messages
+    .filter((message) => message.sender_id !== userId && !message.deleted_at)
+    .map((message) => ({
+      message_id: message.id,
+      user_id: userId,
+      status: "delivered" as const,
+      updated_at: now,
+    }));
+  if (delivered.length > 0) {
+    await supabase.from("message_receipts").upsert(delivered, {
+      onConflict: "message_id,user_id",
+      ignoreDuplicates: true,
+    });
+  }
+
   if (!sendReceipts) return;
 
   const receipts = messages

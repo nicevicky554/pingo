@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
+import { useBranding } from "@/providers/BrandingProvider";
 import { leaveGroup, listMembers, searchPeople } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
 import type { ConversationMember, Profile } from "@/lib/types";
@@ -35,6 +36,7 @@ type Member = ConversationMember & { profile: Profile | null };
 export default function GroupInfoPage() {
   const { conversationId } = useParams();
   const { profile } = useAuth();
+  const { assets } = useBranding();
   const navigate = useNavigate();
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -211,8 +213,12 @@ export default function GroupInfoPage() {
             className="relative flex size-24 items-center justify-center overflow-hidden rounded-full bg-secondary text-primary ring-1 ring-border"
             aria-label={canManage ? "Change group photo" : "Group photo"}
           >
-            {group.avatar_url ? (
-              <img src={group.avatar_url} alt="Group" className="size-full object-cover" />
+            {group.avatar_url || assets.default_group_url ? (
+              <img
+                src={group.avatar_url ?? assets.default_group_url}
+                alt="Group"
+                className="size-full object-cover"
+              />
             ) : (
               <UsersRound className="size-9" />
             )}

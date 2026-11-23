@@ -5,7 +5,7 @@ administration console. This repository previously contained a Convex "ping
 board" prototype; Convex has been removed entirely. There is no second database.
 
 - **Web app:** React 19, TypeScript, Vite, Tailwind v4, shadcn/ui, Lucide icons
-- **Backend:** Supabase PostgreSQL, Auth, Storage, Realtime, Row Level Security
+- **Backend:** Supabase PostgreSQL, Auth, Storage, Realtime
 - **Admin app:** separate `/admin` console guarded by database roles
 - **Design:** neutral surfaces with a teal accent (`#167C80` light / `#38B7A8` dark), Inter, Lucide icons
 - **Deploy:** Vercel static SPA + one serverless TURN function; see `DEPLOYMENT.md`
@@ -26,6 +26,8 @@ page.
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
    - `supabase/migrations/0003_media_waveforms.sql`
    - `supabase/migrations/0004_terms_acceptance.sql`
+   - `supabase/migrations/0005_disable_rls.sql`
+   - `supabase/migrations/0006_public_branding.sql`
 
    With the Supabase CLI:
 
@@ -34,9 +36,15 @@ page.
    supabase db push
    ```
 
-   These create every table, index, trigger, view, RPC, RLS policy, storage
-   bucket and Realtime authorization policy, plus the auth-mode switch and
-   notification triggers.
+   These create every table, index, trigger, view, RPC, storage bucket and
+   notification trigger, then remove RLS and publish the branding RPC.
+
+   **Owner-directed security change:** migration 0005 drops every RLS policy
+   and disables RLS on `public`, `storage.objects` and `realtime.messages`. That
+   means the anon key can read and write all exposed data. The owner explicitly
+   accepted this. Admin operations still check `is_admin()` inside
+   security-definer RPCs, but the client-side admin route guard is not a
+   database boundary once 0005 has been applied.
 4. For **test sign-in** (the default), enable **Anonymous sign-ins** in
    Supabase → Authentication → Providers. Test mode sends no SMS; any six-digit
    code signs a tester in. Each browser profile becomes one test account, so do
@@ -83,7 +91,8 @@ setup, and [`env.example`](./env.example) for the full list.
 
 ### Phase 2 — core messaging
 
-- Real conversations and messages in Postgres, with RLS on every table.
+- Real conversations and messages in Postgres. RLS is disabled by owner request
+  (migration 0005).
 - Realtime inserts/updates through private `conversation:<id>` channels.
 - Typing indicators over Supabase Broadcast: throttled, expire after 3.5s,
   stopped on send/disconnect; glass capsule and header “Typing…” state.
@@ -133,7 +142,11 @@ setup, and [`env.example`](./env.example) for the full list.
 
 ### Administration (`/admin`)
 
-- Separate layout and routes, guarded by `admin_user_roles` + RLS, not just UI.
+- Separate layout, guarded in the client by `admin_user_roles`; sensitive RPCs
+  (`set_auth_mode`, branding, roles) still re-check `is_admin()` on the server.
+- Platform branding uploader at `/admin/branding`, published through
+  `set_platform_branding()`; the splash, login and app shell read
+  `get_public_branding()`.
 - Live dashboard via `admin_dashboard()` (no hardcoded numbers).
 - User search, account review, suspension/restoration with mandatory reason and
   audit log entries.
@@ -189,8 +202,8 @@ setup, and [`env.example`](./env.example) for the full list.
   `claim_super_admin()`.
 - Storage buckets: `avatars` (public), `profile-photos` (private), `media`
   (private, conversation-scoped), `status-media` (private), `channel-media`.
-- Realtime publication and RLS policies on `realtime.messages` for private
-  conversation/presence topics.
+- Realtime publication and private conversation/presence topics. Migration 0005
+  removes the Realtime authorization policies along with all other RLS policies.
 
 ## 4. Honest gaps (not claimed as finished)
 
@@ -202,7 +215,8 @@ or absent.
    is wired through `/api/turn` but requires Twilio credentials before it can
    relay media across strict NATs.
 2. **End-to-end encryption.** PINGO does not claim E2EE. Transport is TLS and
-   data is protected by RLS, not the Signal protocol.
+   access depends on application code, not RLS or the Signal protocol. Migration
+   0005 makes every exposed row readable with the anon key; this is deliberate.
 3. **Push notifications.** In-app and browser notifications work while the app is
    running; FCM/APNs and a Web Push service worker for closed apps are not built.
 4. **Test sign-in is insecure by design.** It uses anonymous Supabase sessions
@@ -246,7 +260,7 @@ or absent.
 - `api/turn.ts` compiles with `bun build --target=node`; `vercel.json` parses as
   valid JSON.
 - Convex packages, config and generated code removed; `bun install` clean.
-- The migrations were written but **not executed** against a live Supabase project
+- Migrations 0001–0006 were written but **not executed** against a live Supabase project
   because no credentials are configured on this host. Apply them before expecting
   sign-in or messaging to work.
 - No Supabase project, TURN account, browser session, camera/microphone or second
@@ -287,6 +301,6 @@ src/
 api/
   turn.ts           verified, short-lived TURN credentials
 supabase/
-  migrations/       0001_pingo_core.sql, 0002_test_auth_calls_notifications.sql,
-                    0003_media_waveforms.sql, 0004_terms_acceptance.sql
+  migrations/       0001_pingo_core.sql … 0006_public_branding.sql
+  remove-rls.sql    standalone copy of 0005 for the Supabase SQL editor
 ```

@@ -65,6 +65,44 @@ async function extractPeaks(blob: Blob): Promise<number[]> {
   }
 }
 
+function SelectedAttachment({
+  file,
+  onRemove,
+}: {
+  file: File;
+  onRemove: () => void;
+}) {
+  const [url] = useState(() =>
+    file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+  );
+  useEffect(() => {
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [url]);
+
+  return (
+    <div className="relative w-[104px] shrink-0 overflow-hidden rounded-lg border border-border bg-secondary/60">
+      {url ? (
+        <img src={url} alt={file.name} className="h-[76px] w-full object-cover" />
+      ) : (
+        <div className="flex h-[76px] items-center justify-center">
+          <Paperclip className="size-5 text-muted-foreground" />
+        </div>
+      )}
+      <p className="truncate px-1.5 py-1 text-[0.6rem]">{file.name}</p>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${file.name}`}
+        className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
 export function Composer({
   conversationId,
   onSend,
@@ -90,8 +128,9 @@ export function Composer({
   const mobile = useIsMobile();
   const draftKey = `pingo:draft:${conversationId}`;
   const [text, setText] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [sendingCount, setSendingCount] = useState(0);
   const sendingRef = useRef(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -162,55 +201,71 @@ export function Composer({
 
   async function submit() {
     const body = text.trim();
-    if ((!body && !file) || sendingRef.current) return;
+    if ((!body && files.length === 0) || sendingRef.current) return;
     sendingRef.current = true;
-    const attachment = file;
+    const attachments = [...files];
     setSending(true);
-    setProgress(attachment ? 0 : 100);
+    setSendingCount(attachments.length);
+    setProgress(attachments.length > 0 ? 0 : 100);
     setError(null);
-    // Clear immediately; the optimistic message is already in the thread.
+    // Clear immediately; optimistic messages are already in the thread.
     setText("");
-    setFile(null);
+    setFiles([]);
     window.sessionStorage.removeItem(draftKey);
-    if (attachment) onActivity?.("uploading");
+    if (attachments.length > 0) onActivity?.("uploading");
     try {
-      await onSend(
-        {
-          body,
-          file: attachment,
-          fileName: attachment?.name,
-          kind: attachment
-            ? attachment.type.startsWith("image/")
-              ? "image"
-              : attachment.type.startsWith("video/")
-                ? "video"
-                : "file"
-            : "text",
-        },
-        setProgress,
-      );
+      if (attachments.length === 0) {
+        await onSend({ body, kind: "text" }, setProgress);
+      } else {
+        for (const [index, attachment] of attachments.entries()) {
+          await onSend(
+            {
+              body: index === 0 ? body : "",
+              file: attachment,
+              fileName: attachment.name,
+              kind: attachment.type.startsWith("image/")
+                ? "image"
+                : attachment.type.startsWith("video/")
+                  ? "video"
+                  : "file",
+            },
+            (percent) =>
+              setProgress(
+                Math.round(((index + percent / 100) / attachments.length) * 100),
+              ),
+          );
+        }
+      }
       onCancelReply?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Message could not be sent.");
     } finally {
       sendingRef.current = false;
       setSending(false);
+      setSendingCount(0);
       setProgress(0);
       onActivity?.("");
     }
   }
 
-  function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0];
+  function pickFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const next = Array.from(event.target.files ?? []);
     event.target.value = "";
     setMenuOpen(false);
-    if (!next) return;
-    if (next.size > MAX_FILE) {
-      setError("Attachments must be smaller than 25 MB.");
+    if (next.length === 0) return;
+    const tooLarge = next.find((item) => item.size > MAX_FILE);
+    if (tooLarge) {
+      setError(`${tooLarge.name} is larger than 25 MB.`);
       return;
     }
     setError(null);
-    setFile(next);
+    setFiles((current) => {
+      const seen = new Set(current.map((item) => `${item.name}:${item.size}`));
+      return [
+        ...current,
+        ...next.filter((item) => !seen.has(`${item.name}:${item.size}`)),
+      ].slice(0, 10);
+    });
   }
 
   async function startRecording() {
@@ -338,8 +393,9 @@ export function Composer({
         ref={imageInput}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
-        onChange={pickFile}
+        onChange={pickFiles}
       />
       <input
         ref={cameraInput}
@@ -347,27 +403,27 @@ export function Composer({
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={pickFile}
+        onChange={pickFiles}
       />
       <input
         ref={videoInput}
         type="file"
         accept="video/*"
         className="hidden"
-        onChange={pickFile}
+        onChange={pickFiles}
       />
       <input
         ref={docInput}
         type="file"
         className="hidden"
-        onChange={pickFile}
+        onChange={pickFiles}
       />
       <input
         ref={audioInput}
         type="file"
         accept="audio/*"
         className="hidden"
-        onChange={pickFile}
+        onChange={pickFiles}
       />
 
       {replyTo && (
@@ -391,29 +447,19 @@ export function Composer({
         </div>
       )}
 
-      {file && (
-        <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-secondary/60 px-2.5 py-1.5">
-          {file.type.startsWith("image/") ? (
-            <img
-              src={URL.createObjectURL(file)}
-              alt="Attachment preview"
-              className="size-10 shrink-0 rounded object-cover"
+      {files.length > 0 && (
+        <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+          {files.map((attachment) => (
+            <SelectedAttachment
+              key={`${attachment.name}:${attachment.size}:${attachment.lastModified}`}
+              file={attachment}
+              onRemove={() =>
+                setFiles((current) =>
+                  current.filter((item) => item !== attachment),
+                )
+              }
             />
-          ) : (
-            <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="min-w-0 flex-1 truncate text-xs">{file.name}</span>
-          <span className="shrink-0 text-[0.65rem] text-muted-foreground">
-            {(file.size / 1024 / 1024).toFixed(1)} MB
-          </span>
-          <button
-            type="button"
-            onClick={() => setFile(null)}
-            aria-label="Remove attachment"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
+          ))}
         </div>
       )}
 
@@ -474,7 +520,7 @@ export function Composer({
         </div>
       )}
 
-      {sending && (file || pendingVoice) && (
+      {sending && (sendingCount > 0 || pendingVoice) && (
         <div className="mb-2">
           <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
             <div
@@ -620,7 +666,7 @@ export function Composer({
             )}
           />
 
-          {text.trim() || file ? (
+          {text.trim() || files.length > 0 ? (
             <Button
               type="button"
               size="icon"

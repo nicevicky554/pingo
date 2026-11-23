@@ -4,6 +4,7 @@ import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
 import { BrandSplash } from "@/components/BrandSplash";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { BrandingProvider } from "@/providers/BrandingProvider";
 import { CallProvider } from "@/providers/CallProvider";
 import { NotificationsProvider } from "@/providers/NotificationsProvider";
 import { PresenceProvider } from "@/providers/PresenceProvider";
@@ -27,6 +28,7 @@ const UpdatesPage = lazy(() => import("./pages/app/UpdatesPage.tsx"));
 const CommunitiesPage = lazy(() => import("./pages/app/CommunitiesPage.tsx"));
 const CallsPage = lazy(() => import("./pages/app/CallsPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/app/SettingsPage.tsx"));
+const SettingsHomePage = lazy(() => import("./pages/app/SettingsHomePage.tsx"));
 const NewMessagePage = lazy(() => import("./pages/app/NewMessagePage.tsx"));
 const SearchPage = lazy(() => import("./pages/app/SearchPage.tsx"));
 const ProfilePage = lazy(() => import("./pages/app/ProfilePage.tsx"));
@@ -53,6 +55,7 @@ const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminReports = lazy(() => import("./pages/admin/AdminReports.tsx"));
 const AdminAccess = lazy(() => import("./pages/admin/AdminAccess.tsx"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings.tsx"));
+const AdminBranding = lazy(() => import("./pages/admin/AdminBranding.tsx"));
 
 const AppShell = lazy(() =>
   import("@/components/app/AppShell").then((module) => ({
@@ -71,7 +74,7 @@ const AdminShell = lazy(() =>
 );
 
 function RouteLoading() {
-  return <BrandSplash label="Opening PINGO" />;
+  return <BrandSplash />;
 }
 
 class ToolbarErrorBoundary extends React.Component<
@@ -217,7 +220,8 @@ function AppProviders() {
             <Route path="communities" element={<CommunitiesPage />} />
             <Route path="communities/create" element={<CreateCommunityPage />} />
             <Route path="calls" element={<CallsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings" element={<SettingsHomePage />} />
+            <Route path="settings/:section" element={<SettingsPage />} />
           </Route>
 
           <Route
@@ -244,6 +248,7 @@ function AppProviders() {
             <Route path="reports" element={<AdminReports />} />
             <Route path="access" element={<AdminAccess />} />
             <Route path="settings" element={<AdminSettings />} />
+            <Route path="branding" element={<AdminBranding />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />
@@ -262,11 +267,13 @@ createRoot(document.getElementById("root")!).render(
         <VlyToolbar />
       </ToolbarErrorBoundary>
       <AuthProvider>
-        <BrowserRouter>
-          <RouteSyncer />
-          <AppProviders />
-        </BrowserRouter>
-        <Toaster />
+        <BrandingProvider>
+          <BrowserRouter>
+            <RouteSyncer />
+            <AppProviders />
+          </BrowserRouter>
+          <Toaster />
+        </BrandingProvider>
       </AuthProvider>
     </RootErrorBoundary>
   </StrictMode>,

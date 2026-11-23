@@ -23,7 +23,7 @@ import { useNavigate, useParams } from "react-router";
 
 export default function ProfilePage() {
   const { userId } = useParams();
-  const { profile: me } = useAuth();
+  const { profile: me, session } = useAuth();
   const { startCall } = useCall();
   const { online } = usePresence();
   const navigate = useNavigate();
@@ -197,6 +197,11 @@ export default function ProfilePage() {
               "Offline"
             )}
           </p>
+          {isSelf && (
+            <p className="mt-2 text-sm font-medium tabular-nums">
+              {session?.user.phone ?? me?.phone ?? "No verified phone on this session"}
+            </p>
+          )}
           {person.about && (
             <p className="mt-4 max-w-md text-sm leading-6 text-foreground/90">
               {person.about}

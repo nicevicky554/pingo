@@ -1,22 +1,34 @@
-import { PingoMark } from "@/components/Wordmark";
+import { BrandLogo } from "@/components/BrandLogo";
+import { useBranding } from "@/providers/BrandingProvider";
 
 /**
- * Shown only while the session is being restored or a route chunk loads.
- * Never mounted on internal navigation after the session is ready.
+ * Startup / session restore. No marketing copy, no fake percentage and no
+ * progress bar. The dots only indicate that real session loading is happening.
  */
-export function BrandSplash({ label = "Restoring your session" }: { label?: string }) {
+export function BrandSplash() {
+  const { assets } = useBranding();
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-6">
+    <main
+      className="flex min-h-dvh flex-col items-center justify-center bg-background bg-cover bg-center"
+      style={
+        assets.splash_background_url
+          ? { backgroundImage: `url(${assets.splash_background_url})` }
+          : undefined
+      }
+      aria-busy="true"
+      aria-label="Starting PINGO"
+    >
       <div className="splash-mark">
-        <PingoMark className="size-16 shadow-sm" />
+        <BrandLogo kind="splash" className="size-16 shadow-sm" />
       </div>
-      <p className="splash-word mt-5 text-[1.35rem] font-semibold tracking-[-0.04em]">
+      <p className="splash-word mt-5 text-[1.3rem] font-semibold tracking-[-0.045em]">
         PINGO
       </p>
-      <p className="mt-2 text-xs font-medium text-muted-foreground">{label}…</p>
-      <div className="mt-6 h-[2px] w-24 overflow-hidden rounded-full bg-border">
-        <span className="splash-progress block h-full w-1/2 rounded-full bg-primary" />
-      </div>
+      <span className="mt-5 flex items-center gap-1.5 text-muted-foreground" aria-hidden="true">
+        <span className="typing-dot size-1.5 rounded-full bg-current" />
+        <span className="typing-dot size-1.5 rounded-full bg-current" />
+        <span className="typing-dot size-1.5 rounded-full bg-current" />
+      </span>
     </main>
   );
 }

@@ -22,7 +22,14 @@ Convex dependency.
    - `supabase/migrations/0001_pingo_core.sql`
    - `supabase/migrations/0002_test_auth_calls_notifications.sql`
    - `supabase/migrations/0003_media_waveforms.sql`
-   - `supabase/migrations/0004_terms_acceptance.sql`
+       - `supabase/migrations/0004_terms_acceptance.sql`
+    - `supabase/migrations/0005_disable_rls.sql` (owner-requested RLS removal)
+    - `supabase/migrations/0006_public_branding.sql`
+
+    `0005` disables RLS and drops every policy in `public`, `storage.objects`
+    and `realtime.messages`. Anyone with the anon key can then read and write
+    exposed data. If you have not explicitly accepted that, stop and keep 0005
+    unapplied. `supabase/remove-rls.sql` is the same script for the SQL editor.
 
 4. **Authentication → Providers**
    - **Test mode (default):** enable **Anonymous sign-ins**.

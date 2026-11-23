@@ -18,6 +18,7 @@ import { supabase } from "@/lib/supabase";
 import type { UserSettings, Visibility } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
+  ArrowLeft,
   Camera,
   Check,
   ImageOff,
@@ -29,7 +30,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useNavigate } from "react-router";
+import { useNavigate, useParams } from "react-router";
 
 const VISIBILITY_LABELS: Record<Visibility, string> = {
   everyone: "Everyone",
@@ -89,6 +90,25 @@ function VisibilityPicker({
 export default function SettingsPage() {
   const { profile, settings, session, refresh, signOut } = useAuth();
   const navigate = useNavigate();
+  const { section } = useParams();
+  const SECTIONS = [
+    "profile",
+    "privacy",
+    "appearance",
+    "notifications",
+    "security",
+    "account",
+    "about",
+  ] as const;
+  const activeSection = SECTIONS.includes(
+    (section ?? "profile") as (typeof SECTIONS)[number],
+  )
+    ? (section ?? "profile")
+    : "profile";
+  const sectionTitle =
+    activeSection === "about"
+      ? "About PINGO"
+      : activeSection.charAt(0).toUpperCase() + activeSection.slice(1);
 
   const [name, setName] = useState(profile?.display_name ?? "");
   const [username, setUsername] = useState(profile?.username ?? "");
@@ -242,10 +262,20 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
-        <UserAvatar profile={profile} size="md" showPresence />
+      <header className="glass sticky top-0 z-10 flex h-14 items-center gap-2 border-x-0 border-t-0 px-2 sm:px-4">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-9 shrink-0 text-muted-foreground"
+          aria-label="Back to settings"
+          onClick={() => navigate("/app/settings")}
+        >
+          <ArrowLeft className="size-[19px]" />
+        </Button>
         <div className="min-w-0">
-          <h1 className="truncate text-[1.05rem] font-semibold tracking-[-0.01em]">Settings</h1>
+          <h1 className="truncate text-[1rem] font-semibold tracking-[-0.015em]">
+            {sectionTitle}
+          </h1>
           <p className="truncate text-[0.68rem] text-muted-foreground">
             {profile.display_name} · @{profile.username}
           </p>
@@ -253,8 +283,11 @@ export default function SettingsPage() {
       </header>
 
       <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-        <Tabs defaultValue="profile">
-          <TabsList className="w-full justify-start overflow-x-auto">
+        <Tabs
+          value={activeSection}
+          onValueChange={(value) => navigate(`/app/settings/${value}`)}
+        >
+          <TabsList className="hidden">
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="privacy">Privacy</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
@@ -768,6 +801,44 @@ export default function SettingsPage() {
               >
                 Request account deletion
               </Button>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="about" className="mt-2 space-y-4">
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="text-sm font-bold">PINGO</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                PINGO is a Supabase-backed messaging application. Messages,
+                media, calls, channels, groups and statuses are stored in your
+                own Supabase project.
+              </p>
+              <dl className="mt-4 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Account ID</dt>
+                  <dd className="truncate font-mono text-xs">{profile.id}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Phone</dt>
+                  <dd className="font-medium tabular-nums">
+                    {session?.user.phone ?? profile.phone ?? "Not verified"}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Backend</dt>
+                  <dd className="font-medium">Supabase</dd>
+                </div>
+              </dl>
+              <div className="mt-4 flex flex-wrap gap-3 text-xs">
+                <a href="/terms" className="font-medium text-primary hover:underline">
+                  Terms
+                </a>
+                <a href="/privacy" className="font-medium text-primary hover:underline">
+                  Privacy
+                </a>
+                <a href="/guidelines" className="font-medium text-primary hover:underline">
+                  Guidelines
+                </a>
+              </div>
             </section>
           </TabsContent>
         </Tabs>

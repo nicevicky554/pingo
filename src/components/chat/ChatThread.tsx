@@ -879,11 +879,20 @@ export function ChatThread({
                     (row) =>
                       row.message_id === message.id && row.user_id !== currentUserId,
                   );
-                  const receipt = !receiptsEnabled
-                    ? "sent"
-                    : receiptRows.some((row) => row.status === "read")
+                  const otherMembers = isGroup
+                    ? Math.max(
+                        members.filter((member) => member.user_id !== currentUserId)
+                          .length,
+                        1,
+                      )
+                    : 1;
+                  const readRows = receiptRows.filter(
+                    (row) => row.status === "read",
+                  ).length;
+                  const receipt =
+                    receiptsEnabled && readRows >= otherMembers
                       ? "read"
-                      : receiptRows.length > 0
+                      : receiptRows.length >= otherMembers
                         ? "delivered"
                         : "sent";
                   const replyMessage = message.reply_to_id

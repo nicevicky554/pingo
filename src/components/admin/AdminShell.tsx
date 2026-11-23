@@ -9,6 +9,7 @@ import {
   Flag,
   Settings2,
   Shield,
+  Sparkles,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -20,6 +21,7 @@ const ADMIN_NAV = [
   { to: "/admin/reports", label: "Reports", icon: Flag },
   { to: "/admin/access", label: "Audit & team", icon: FileClock },
   { to: "/admin/settings", label: "Platform", icon: Settings2 },
+  { to: "/admin/branding", label: "Branding", icon: Sparkles },
 ];
 
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -28,12 +30,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
-        <div className="flex items-center gap-2.5 border-b border-sidebar-border px-5 py-4">
+      <aside className="hidden w-60 shrink-0 flex-col bg-[#0d1820] text-white md:flex">
+        <div className="flex items-center gap-2.5 border-b border-white/10 px-5 py-4">
           <PingoMark className="size-8" />
           <div>
-            <p className="text-sm leading-none font-extrabold">PINGO</p>
-            <p className="mt-1 text-[0.6rem] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+            <p className="text-sm leading-none font-semibold tracking-[0.02em]">PINGO</p>
+            <p className="mt-1 text-[0.58rem] font-medium uppercase tracking-[0.2em] text-white/45">
               Administration
             </p>
           </div>
@@ -49,10 +51,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 end={item.end}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors",
+                    "flex items-center gap-2.5 rounded-md px-3 py-2.5 text-[0.82rem] font-medium transition-colors",
                     isActive
-                      ? "bg-sidebar-accent text-primary"
-                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                      ? "bg-white/10 text-[#7cded1]"
+                      : "text-white/55 hover:bg-white/5 hover:text-white",
                   )
                 }
               >
@@ -63,12 +65,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="border-t border-sidebar-border p-3">
-          <div className="rounded-lg bg-muted/60 px-3 py-2.5">
-            <p className="truncate text-xs font-semibold">
+        <div className="border-t border-white/10 p-3">
+          <div className="rounded-md bg-white/5 px-3 py-2.5">
+            <p className="truncate text-xs font-medium text-white/85">
               {profile?.display_name || "Administrator"}
             </p>
-            <p className="mt-0.5 flex items-center gap-1 text-[0.65rem] capitalize text-muted-foreground">
+            <p className="mt-0.5 flex items-center gap-1 text-[0.62rem] capitalize text-white/45">
               <Shield className="size-3" />
               {adminRole?.replace(/_/g, " ")}
             </p>
@@ -76,7 +78,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <Button
             variant="ghost"
             size="sm"
-            className="mt-2 w-full justify-start gap-2 text-muted-foreground"
+            className="mt-2 w-full justify-start gap-2 text-white/50 hover:bg-white/5 hover:text-white"
             onClick={() => navigate("/app/chats")}
           >
             <ArrowLeft className="size-4" /> Back to PINGO
@@ -84,7 +86,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start gap-2 text-muted-foreground"
+            className="w-full justify-start gap-2 text-white/50 hover:bg-white/5 hover:text-white"
             onClick={() => void signOut().then(() => navigate("/"))}
           >
             Sign out

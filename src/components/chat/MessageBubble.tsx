@@ -487,7 +487,10 @@ export function MessageBubble({
               (receipt === "read" ? (
                 <CheckCheck className="size-3.5 text-primary" aria-label="Read" />
               ) : receipt === "delivered" ? (
-                <CheckCheck className="size-3.5" aria-label="Delivered" />
+                <CheckCheck
+                  className="size-3.5 opacity-55"
+                  aria-label="Delivered"
+                />
               ) : (
                 <Check className="size-3.5" aria-label="Sent" />
               ))}

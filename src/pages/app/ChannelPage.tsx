@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/app/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { useBranding } from "@/providers/BrandingProvider";
 import { supabase } from "@/lib/supabase";
 import type { Channel } from "@/lib/types";
 import {
@@ -29,6 +30,7 @@ type Post = {
 export default function ChannelPage() {
   const { channelId } = useParams();
   const { profile } = useAuth();
+  const { assets } = useBranding();
   const navigate = useNavigate();
   const [channel, setChannel] = useState<Channel | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -148,8 +150,12 @@ export default function ChannelPage() {
       <div className="mx-auto w-full max-w-2xl px-4 py-5">
         <div className="flex flex-col items-center text-center">
           <span className="flex size-24 items-center justify-center overflow-hidden rounded-full bg-secondary text-primary ring-1 ring-border">
-            {channel.avatar_url ? (
-              <img src={channel.avatar_url} alt={channel.name} className="size-full object-cover" />
+            {channel.avatar_url || assets.default_channel_url ? (
+              <img
+                src={channel.avatar_url ?? assets.default_channel_url}
+                alt={channel.name}
+                className="size-full object-cover"
+              />
             ) : (
               <Hash className="size-9" />
             )}

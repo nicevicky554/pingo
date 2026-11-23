@@ -1,4 +1,4 @@
-import { PingoMark } from "@/components/Wordmark";
+import { BrandLogo } from "@/components/BrandLogo";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -141,7 +141,7 @@ export default function AuthPage() {
     <div className="flex min-h-dvh flex-col bg-background">
       <main className="mx-auto flex w-full max-w-[420px] flex-1 flex-col justify-center px-6 py-10">
         <div className="flex items-center gap-2.5">
-          <PingoMark className="size-9" />
+          <BrandLogo kind="logo" className="size-9 rounded-lg" />
           <span className="text-[1.05rem] font-bold tracking-[0.08em] text-foreground">
             PINGO
           </span>
