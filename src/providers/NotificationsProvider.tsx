@@ -1,4 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
+import { subscribeToPush } from "@/lib/push";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
   createContext,
@@ -156,7 +157,12 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     if (typeof Notification === "undefined") return;
     const result = await Notification.requestPermission();
     setPermission(result);
+    if (result === "granted") void subscribeToPush();
   }, []);
+
+  useEffect(() => {
+    if (userId && permission === "granted") void subscribeToPush();
+  }, [userId, permission]);
 
   const markRead = useCallback(async (row: NotificationRow) => {
     if (row.read_at) return;

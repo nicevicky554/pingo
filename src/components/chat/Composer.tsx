@@ -18,10 +18,12 @@ import { cn } from "@/lib/utils";
 import {
   AudioLines,
   Camera,
+  ChevronLeft,
   Eye,
   FileText,
   Image as ImageIcon,
   Loader2,
+  Lock,
   Mic,
   Pause,
   Paperclip,
@@ -29,6 +31,7 @@ import {
   Send,
   Smile,
   Square,
+  Trash2,
   Video,
   X,
 } from "lucide-react";
@@ -145,6 +148,16 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordingPaused, setRecordingPaused] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [slideState, setSlideState] = useState<"idle" | "cancel" | "lock">("idle");
+  const holdRef = useRef<{
+    x: number;
+    y: number;
+    at: number;
+    released: boolean;
+    locked: boolean;
+    cancelled: boolean;
+  } | null>(null);
   const [pendingVoice, setPendingVoice] = useState<{
     blob: Blob;
     url: string;
@@ -288,7 +301,7 @@ export function Composer({
     });
   }
 
-  async function startRecording() {
+  async function startRecording(): Promise<boolean> {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -354,12 +367,77 @@ export function Composer({
         peaksRef.current = [...peaksRef.current.slice(-(BAR_COUNT - 1)), peak];
         setLivePeaks([...peaksRef.current]);
       }, 120);
+      return true;
     } catch {
       setError("Microphone access was blocked. Allow it in your browser settings.");
+      return false;
     }
   }
 
+  function beginHold(event: React.PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || holdRef.current) return;
+    const hold = {
+      x: event.clientX,
+      y: event.clientY,
+      at: Date.now(),
+      released: false,
+      locked: false,
+      cancelled: false,
+    };
+    holdRef.current = hold;
+    setLocked(false);
+    setSlideState("idle");
+
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      hold.released = true;
+      if (!recorderRef.current || recorderRef.current.state === "inactive") return;
+      if (hold.locked) return;
+      if (hold.cancelled || Date.now() - hold.at < 600) {
+        stopRecording(true);
+        if (!hold.cancelled) setError("Hold the microphone to record a voice note.");
+      } else {
+        stopRecording(false);
+      }
+    };
+    const move = (moveEvent: PointerEvent) => {
+      if (hold.locked || hold.cancelled) return;
+      const dx = moveEvent.clientX - hold.x;
+      const dy = moveEvent.clientY - hold.y;
+      if (dx < -90) {
+        hold.cancelled = true;
+        setSlideState("cancel");
+        finish();
+      } else if (dy < -70) {
+        hold.locked = true;
+        setLocked(true);
+        setSlideState("lock");
+      } else {
+        setSlideState(dx < -30 ? "cancel" : dy < -30 ? "lock" : "idle");
+      }
+    };
+    const up = () => finish();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+
+    void startRecording().then((started) => {
+      if (!started) {
+        holdRef.current = null;
+        return;
+      }
+      if (hold.released && !hold.locked) {
+        stopRecording(true);
+      }
+    });
+  }
+
   function stopRecording(cancel = false) {
+    holdRef.current = null;
+    setLocked(false);
+    setSlideState("idle");
     cancelRef.current = cancel;
     recorderRef.current?.stop();
   }
@@ -710,38 +788,63 @@ export function Composer({
                   />
                 ))}
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0"
-            onClick={toggleRecordingPause}
-            type="button"
-            aria-label={recordingPaused ? "Resume recording" : "Pause recording"}
-          >
-            {recordingPaused ? (
-              <Play className="size-3.5" />
-            ) : (
-              <Pause className="size-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 shrink-0 px-2 text-xs"
-            onClick={() => stopRecording(true)}
-            type="button"
-          >
-            Cancel
-          </Button>
-          <Button
-            size="icon"
-            className="size-8 shrink-0 rounded-full"
-            onClick={() => stopRecording(false)}
-            type="button"
-            aria-label="Stop and send voice note"
-          >
-            <Square className="size-3.5" />
-          </Button>
+          {locked ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0"
+                onClick={toggleRecordingPause}
+                type="button"
+                aria-label={recordingPaused ? "Resume recording" : "Pause recording"}
+              >
+                {recordingPaused ? (
+                  <Play className="size-3.5" />
+                ) : (
+                  <Pause className="size-3.5" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0 text-destructive"
+                onClick={() => stopRecording(true)}
+                type="button"
+                aria-label="Delete recording"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+              <Button
+                size="icon"
+                className="size-8 shrink-0 rounded-full"
+                onClick={() => stopRecording(false)}
+                type="button"
+                aria-label="Stop and preview voice note"
+              >
+                <Square className="size-3.5" />
+              </Button>
+            </>
+          ) : (
+            <span
+              className={cn(
+                "flex shrink-0 items-center gap-1 text-[0.68rem] font-medium",
+                slideState === "cancel" ? "text-destructive" : "text-muted-foreground",
+              )}
+              aria-live="polite"
+            >
+              {slideState === "lock" ? (
+                <>
+                  <Lock className="size-3.5" /> Release to lock
+                </>
+              ) : (
+                <>
+                  <ChevronLeft className="size-3.5" /> Slide to cancel
+                  <Lock className="ml-1.5 size-3" aria-hidden="true" />
+                  <span className="sr-only">Slide up to lock</span>
+                </>
+              )}
+            </span>
+          )}
         </div>
       ) : (
         <div className="flex items-end gap-1">
@@ -845,9 +948,21 @@ export function Composer({
             <Button
               type="button"
               size="icon"
-              className="size-9 shrink-0 rounded-full"
-              onClick={() => void startRecording()}
-              aria-label="Record a voice note"
+              onPointerDown={beginHold}
+              onContextMenu={(event) => event.preventDefault()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  if (!recorderRef.current || recorderRef.current.state === "inactive") {
+                    holdRef.current = null;
+                    void startRecording().then((started) => {
+                      if (started) setLocked(true);
+                    });
+                  }
+                }
+              }}
+              aria-label="Hold to record a voice note"
+              className="size-9 shrink-0 touch-none rounded-full select-none"
             >
               <Mic className="size-[19px]" />
             </Button>

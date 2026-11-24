@@ -61,3 +61,27 @@ self.addEventListener("notificationclick", (event) => {
     }),
   );
 });
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { title: "PINGO", body: event.data ? event.data.text() : "" };
+  }
+  const title = payload.title || "PINGO";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      // The in-app notification handles foreground delivery.
+      if (clients.some((client) => client.visibilityState === "visible")) return undefined;
+      return self.registration.showNotification(title, {
+        body: payload.body || "",
+        tag: payload.tag,
+        renotify: Boolean(payload.tag),
+        icon: "/logo192.png",
+        badge: "/logo192.png",
+        data: { url: payload.url || "/app/chats" },
+      });
+    }),
+  );
+});

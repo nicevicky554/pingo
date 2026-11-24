@@ -1,29 +1,18 @@
-import { UserAvatar } from "@/components/UserAvatar";
 import { BrandLogo } from "@/components/BrandLogo";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { useStatusRings } from "@/hooks/use-status-rings";
 import { useBranding } from "@/providers/BrandingProvider";
 import { cn } from "@/lib/utils";
 import {
-  LogOut,
   MessageSquare,
   Phone,
   Radio,
   Settings,
-  Shield,
   UsersRound,
   WifiOff,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router";
+import { NavLink, useLocation } from "react-router";
 import { watchChannel } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
 
@@ -94,51 +83,6 @@ function useConnectionStatus() {
   return online;
 }
 
-function ProfileMenu() {
-  const { profile, adminRole, signOut } = useAuth();
-  const navigate = useNavigate();
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-          aria-label="Open your profile menu"
-        >
-          <UserAvatar profile={profile} size="sm" showPresence />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="w-60">
-        <DropdownMenuLabel>
-          <span className="block truncate text-sm font-semibold">
-            {profile?.display_name || "Your profile"}
-          </span>
-          <span className="block truncate text-xs font-normal text-muted-foreground">
-            {profile?.username ? `@${profile.username}` : "Finish your profile"}
-          </span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate("/app/settings")}>
-          <Settings className="size-4" /> Settings
-        </DropdownMenuItem>
-        {adminRole && (
-          <DropdownMenuItem onSelect={() => navigate("/admin")}>
-            <Shield className="size-4" /> Administration
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          variant="destructive"
-          onSelect={() => void signOut().then(() => navigate("/"))}
-        >
-          <LogOut className="size-4" /> Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 export function AppShell({
   children,
   className,
@@ -168,6 +112,10 @@ export function AppShell({
     "/app/communities/create",
     "/app/updates/create",
     "/app/settings/",
+    "/app/channels/",
+    "/app/updates/",
+    "/app/calls/",
+    "/app/new/",
   ].some((prefix) => location.pathname.startsWith(prefix));
   const hidePrimaryNav = inConversation || focusedWorkflow;
 
@@ -197,10 +145,8 @@ export function AppShell({
                 to={item.to}
                 className={({ isActive }) =>
                   cn(
-                    "relative flex w-full flex-col items-center gap-1 rounded-md py-2 text-[0.58rem] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    isActive
-                      ? "bg-secondary/70 text-primary"
-                      : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                    "liquid-nav-item relative flex w-full flex-col items-center gap-1 rounded-[18px] py-2 text-[0.58rem] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    isActive && "liquid-nav-active",
                   )
                 }
               >
@@ -229,9 +175,6 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="mt-auto flex flex-col items-center gap-1.5">
-          <ProfileMenu />
-        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">

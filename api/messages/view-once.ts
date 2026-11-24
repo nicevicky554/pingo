@@ -5,68 +5,29 @@
  * removes the Storage object and clears the message's attachment reference so
  * it cannot be fetched again from chat history.
  */
-import { createClient } from "@supabase/supabase-js";
+import {
+  authenticate,
+  getMembership,
+  readJson,
+  UUID,
+  type ApiRequest,
+  type ApiResponse,
+} from "../_lib/supabase-admin";
 
-type NodeRequest = {
-  method?: string;
-  headers: Record<string, string | string[] | undefined>;
-  body?: unknown;
-};
-type NodeResponse = {
-  status: (code: number) => NodeResponse;
-  setHeader: (name: string, value: string) => void;
-  json: (body: unknown) => void;
-};
+export default async function handler(req: ApiRequest, res: ApiResponse) {
+  const auth = await authenticate(req, res, {
+    signInMessage: "Sign in before opening media.",
+  });
+  if (!auth) return;
+  const { admin, user } = auth;
+  const viewerId = user.id;
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function pick(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.length > 0);
-}
-
-export default async function handler(req: NodeRequest, res: NodeResponse) {
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Content-Type", "application/json");
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const secretKey = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!supabaseUrl || !secretKey) {
-    res.status(500).json({ error: "Server Supabase credentials are missing." });
-    return;
-  }
-
-  const header = req.headers.authorization;
-  const token = (Array.isArray(header) ? header[0] : header)?.replace(/^Bearer\s+/i, "");
-  if (!token) {
-    res.status(401).json({ error: "Sign in before opening media." });
-    return;
-  }
-
-  const raw = (typeof req.body === "string" ? JSON.parse(req.body) : req.body) as
-    | Record<string, unknown>
-    | undefined;
+  const raw = readJson(req);
   const messageId = String(raw?.message_id ?? "");
   if (!UUID.test(messageId)) {
     res.status(400).json({ error: "Invalid message." });
     return;
   }
-
-  const admin = createClient(supabaseUrl, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: userData, error: userError } = await admin.auth.getUser(token);
-  if (userError || !userData.user) {
-    res.status(401).json({ error: "Your session is no longer valid." });
-    return;
-  }
-  const viewerId = userData.user.id;
 
   const { data: message } = await admin
     .from("messages")
@@ -82,12 +43,7 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const { data: membership } = await admin
-    .from("conversation_members")
-    .select("user_id")
-    .eq("conversation_id", message.conversation_id)
-    .eq("user_id", viewerId)
-    .maybeSingle();
+  const membership = await getMembership(admin, message.conversation_id, viewerId);
   if (!membership) {
     res.status(403).json({ error: "You are not a member of this conversation." });
     return;

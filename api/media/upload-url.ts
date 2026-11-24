@@ -9,64 +9,32 @@
  * Supabase Storage with the short-lived signed token.
  */
 
-import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { rateLimit } from "../_lib/rate-limit";
-
-type NodeRequest = {
-  method?: string;
-  headers: Record<string, string | string[] | undefined>;
-  body?: unknown;
-};
-
-type NodeResponse = {
-  status: (code: number) => NodeResponse;
-  setHeader: (name: string, value: string) => void;
-  json: (body: unknown) => void;
-};
-
-function pick(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.length > 0);
-}
+import {
+  authenticate,
+  getMembership,
+  readJson,
+  UUID,
+  type ApiRequest,
+  type ApiResponse,
+} from "../_lib/supabase-admin";
 
 const MAX_BYTES = 25 * 1024 * 1024;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export default async function handler(req: NodeRequest, res: NodeResponse) {
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Content-Type", "application/json");
+export default async function handler(req: ApiRequest, res: ApiResponse) {
+  const auth = await authenticate(req, res, {
+    signInMessage: "Sign in before uploading media.",
+  });
+  if (!auth) return;
+  const { admin, user } = auth;
 
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const secretKey = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!supabaseUrl || !secretKey) {
-    res.status(500).json({
-      error:
-        "Server Supabase credentials are not configured (SUPABASE_URL / SUPABASE_SECRET_KEY).",
-    });
-    return;
-  }
-
-  const header = req.headers.authorization;
-  const token = (Array.isArray(header) ? header[0] : header)?.replace(
-    /^Bearer\s+/i,
-    "",
-  );
-  if (!token) {
-    res.status(401).json({ error: "Sign in before uploading media." });
-    return;
-  }
-
-  const body = (typeof req.body === "string" ? JSON.parse(req.body) : req.body) as
-    | { conversationId?: string; name?: string; size?: number; type?: string }
-    | undefined;
+  const body = readJson(req) as {
+    conversationId?: string;
+    name?: string;
+    size?: number;
+    type?: string;
+  };
   const conversationId = body?.conversationId ?? "";
   const name = (body?.name ?? "attachment").slice(0, 120);
   const size = Number(body?.size ?? 0);
@@ -80,36 +48,14 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  // Dedicated privileged client: no persisted session and no forwarded user
-  // Authorization header. The user is verified separately below.
-  const admin = createClient(supabaseUrl, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const { data: userData, error: userError } = await admin.auth.getUser(token);
-  if (userError || !userData.user) {
-    res.status(401).json({ error: "Your session is no longer valid." });
-    return;
-  }
-
-  const { data: membership, error: memberError } = await admin
-    .from("conversation_members")
-    .select("user_id,role")
-    .eq("conversation_id", conversationId)
-    .eq("user_id", userData.user.id)
-    .maybeSingle();
-
-  if (memberError) {
-    res.status(500).json({ error: "Membership could not be verified." });
-    return;
-  }
+  const membership = await getMembership(admin, conversationId, user.id);
   if (!membership) {
     res.status(403).json({ error: "You are not a member of this conversation." });
     return;
   }
 
   const limit = await rateLimit(
-    `pingo:upload:${userData.user.id}`,
+    `pingo:upload:${user.id}`,
     30,
     60,
   );

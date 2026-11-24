@@ -6,57 +6,28 @@
  * and channel posting permission are checked independently.
  */
 
-import { createClient } from "@supabase/supabase-js";
 import { rateLimit } from "../_lib/rate-limit";
+import {
+  authenticate,
+  getMembership,
+  readJson,
+  UUID,
+  type ApiRequest,
+  type ApiResponse,
+} from "../_lib/supabase-admin";
 
-type NodeRequest = {
-  method?: string;
-  headers: Record<string, string | string[] | undefined>;
-  body?: unknown;
-};
-
-type NodeResponse = {
-  status: (code: number) => NodeResponse;
-  setHeader: (name: string, value: string) => void;
-  json: (body: unknown) => void;
-};
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KINDS = new Set(["text", "image", "video", "file", "voice"]);
 const MAX_BODY = 20_000;
 
-function pick(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.length > 0);
-}
+export default async function handler(req: ApiRequest, res: ApiResponse) {
+  const auth = await authenticate(req, res, {
+    signInMessage: "Sign in before sending messages.",
+  });
+  if (!auth) return;
+  const { admin, user } = auth;
+  const userId = user.id;
 
-export default async function handler(req: NodeRequest, res: NodeResponse) {
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Content-Type", "application/json");
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const secretKey = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!supabaseUrl || !secretKey) {
-    res.status(500).json({ error: "Server Supabase credentials are missing." });
-    return;
-  }
-
-  const header = req.headers.authorization;
-  const token = (Array.isArray(header) ? header[0] : header)?.replace(/^Bearer\s+/i, "");
-  if (!token) {
-    res.status(401).json({ error: "Sign in before sending messages." });
-    return;
-  }
-
-  const raw = (typeof req.body === "string" ? JSON.parse(req.body) : req.body) as
-    | Record<string, unknown>
-    | undefined;
+  const raw = readJson(req);
   const conversationId = String(raw?.conversation_id ?? "");
   const body = String(raw?.body ?? "").slice(0, MAX_BODY);
   const kind = String(raw?.kind ?? "text");
@@ -85,29 +56,14 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const admin = createClient(supabaseUrl, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: userData, error: userError } = await admin.auth.getUser(token);
-  if (userError || !userData.user) {
-    res.status(401).json({ error: "Your session is no longer valid." });
-    return;
-  }
-  const userId = userData.user.id;
-
   const limit = await rateLimit(`pingo:send:${userId}`, 60, 60);
   if (!limit.allowed) {
     res.status(429).json({ error: "Slow down. Too many messages." });
     return;
   }
 
-  const [{ data: membership }, { data: conversation }] = await Promise.all([
-    admin
-      .from("conversation_members")
-      .select("user_id,role")
-      .eq("conversation_id", conversationId)
-      .eq("user_id", userId)
-      .maybeSingle(),
+  const [membership, { data: conversation }] = await Promise.all([
+    getMembership(admin, conversationId, userId),
     admin
       .from("conversations")
       .select("id,type,announce_only")
