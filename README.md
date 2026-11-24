@@ -53,8 +53,13 @@ page.
    used only inside a trusted server process that separately verifies the
    caller's access token. Anonymous Supabase sign-in must be disabled in the
    dashboard; PINGO no longer calls it.
-4. Enable the **Phone** provider and connect an SMS provider (Twilio,
-   MessageBird, Vonage, etc.). **Disable Anonymous sign-ins.**
+4. Configure phone sign-in. PINGO sends its own six-digit code through Twilio
+   **WhatsApp** (`/api/auth/send-otp`) and verifies it server-side
+   (`/api/auth/verify-otp`) before minting a Supabase session. Also enable the
+   **Phone** provider with an SMS provider as a fallback, and enable the
+   **Email** provider (used only to hold the session; the phone number stays the
+   account identity). **Disable Anonymous sign-ins.** Apply migration
+   `0014_whatsapp_otp.sql` and set `TWILIO_WHATSAPP_FROM`.
 5. To test with two accounts, configure two fixed numbers and codes under
    **Authentication → Phone → Test phone numbers**. Those are real Supabase
    Auth users; PINGO does not accept arbitrary codes.
@@ -72,8 +77,9 @@ setup, and [`env.example`](./env.example) for the full list.
 ### Phase 1 — foundation
 
 - Supabase client, session provider, profile/bootstrap trigger fallback.
-- Phone-first authentication: searchable country selector, dial codes, SMS OTP,
-  resend timer, friendly error messages.
+- Phone-first authentication: searchable country selector, dial codes,
+  WhatsApp OTP (Twilio) with an SMS fallback, resend timer, friendly error
+  messages. Returning numbers sign straight back into their chats.
 - **Phone OTP only:** Supabase Phone Auth creates a real user on the first
   verified code and restores the same `auth.users` row later. There is no app
   test-mode switch, no anonymous session and no arbitrary-code acceptance. Test

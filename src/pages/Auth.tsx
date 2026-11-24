@@ -36,8 +36,12 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 
 function resolveRedirect(returnTo: string | null) {
   if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) return returnTo;
-  return "/";
+  // Returning accounts go straight to their chats. First-time accounts are
+  // shown the setup steps by AppGate at the same destination.
+  return "/app/chats";
 }
+
+type SendResult = { channel: "whatsapp" | "sms" };
 
 export default function AuthPage() {
   const { isLoading: authLoading, isAuthenticated } = useAuth();
@@ -50,6 +54,8 @@ export default function AuthPage() {
   const [phone, setPhone] = useState("");
   const [fullPhone, setFullPhone] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
+  const [channel, setChannel] = useState<"whatsapp" | "sms">("whatsapp");
+  const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +76,42 @@ export default function AuthPage() {
     return () => window.clearInterval(timer);
   }, [secondsLeft]);
 
+  async function requestCode(target: string): Promise<SendResult> {
+    let response: Response | null = null;
+    try {
+      response = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: target }),
+      });
+    } catch {
+      response = null;
+    }
+
+    if (response) {
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+        channel?: string;
+      } | null;
+      if (response.ok && payload?.channel === "whatsapp") {
+        return { channel: "whatsapp" };
+      }
+      if (response.status === 400 || response.status === 429) {
+        throw new Error(payload?.error ?? "Could not send the code.");
+      }
+      // WhatsApp delivery or the API route is unavailable in this environment
+      // (including previews where /api is not served). Fall back to the
+      // Supabase SMS provider so sign-in is never a dead end.
+    }
+
+    const { error: smsError } = await supabase.auth.signInWithOtp({
+      phone: target,
+      options: { shouldCreateUser: true },
+    });
+    if (smsError) throw smsError;
+    return { channel: "sms" };
+  }
+
   async function sendCode(event?: React.FormEvent) {
     event?.preventDefault();
     if (!canSend) return;
@@ -77,13 +119,13 @@ export default function AuthPage() {
     setError(null);
     const target = `+${country.dial}${digits.replace(/^0+/, "")}`;
     try {
-      // Supabase Auth creates the user on first verification and restores the
-      // same auth.users row on every later sign-in. No anonymous fallback.
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        phone: target,
-        options: { shouldCreateUser: true },
-      });
-      if (authError) throw authError;
+      const result = await requestCode(target);
+      setChannel(result.channel);
+      setDeliveryNote(
+        result.channel === "whatsapp"
+          ? "Open WhatsApp to get your code. It expires in five minutes."
+          : "WhatsApp delivery is unavailable right now, so the code was sent by SMS instead.",
+      );
       setFullPhone(target);
       setStep("code");
       setSecondsLeft(45);
@@ -100,12 +142,36 @@ export default function AuthPage() {
     setLoading(true);
     setError(null);
     try {
-      const { error: authError } = await supabase.auth.verifyOtp({
-        phone: fullPhone,
-        token: otp,
-        type: "sms",
-      });
-      if (authError) throw authError;
+      if (channel === "whatsapp") {
+        const response = await fetch("/api/auth/verify-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: fullPhone, code: otp }),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          token_hash?: string;
+          error?: string;
+        } | null;
+        if (!response.ok || !payload?.token_hash) {
+          throw new Error(
+            payload?.error ?? "Could not verify that code. Request a new one.",
+          );
+        }
+        // The server checked the code; exchange its single-use hash for the
+        // real Supabase session on this device.
+        const { error: authError } = await supabase.auth.verifyOtp({
+          token_hash: payload.token_hash,
+          type: "magiclink",
+        });
+        if (authError) throw authError;
+      } else {
+        const { error: authError } = await supabase.auth.verifyOtp({
+          phone: fullPhone,
+          token: otp,
+          type: "sms",
+        });
+        if (authError) throw authError;
+      }
       navigate(redirect, { replace: true });
     } catch (err) {
       setAttempts((count) => count + 1);
@@ -134,8 +200,8 @@ export default function AuthPage() {
               Welcome to PINGO
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Enter your phone number to continue. We use it to identify your
-              account across devices.
+              Enter your phone number and we'll send a six-digit code to
+              WhatsApp. The same number always opens the same account.
             </p>
 
             <div className="mt-9">
@@ -223,7 +289,8 @@ export default function AuthPage() {
                 />
               </div>
               <p className="mt-2 text-[0.7rem] text-muted-foreground">
-                Include the number without the country code.
+                Include the number without the country code. WhatsApp needs to
+                be active on this number.
               </p>
             </div>
 
@@ -272,6 +339,7 @@ export default function AuthPage() {
                 setOtp("");
                 setError(null);
                 setAttempts(0);
+                setDeliveryNote(null);
               }}
               className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
@@ -279,12 +347,19 @@ export default function AuthPage() {
             </button>
 
             <h1 className="mt-6 text-[1.6rem] leading-tight font-semibold tracking-[-0.03em]">
-              Enter verification code
+              {channel === "whatsapp"
+                ? "Enter your WhatsApp code"
+                : "Enter verification code"}
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               We sent a six-digit code to{" "}
               <span className="font-medium text-foreground">{fullPhone}</span>.
             </p>
+            {deliveryNote && (
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {deliveryNote}
+              </p>
+            )}
 
             <div className="mt-7">
               <InputOTP
@@ -365,6 +440,12 @@ function friendlyAuthError(error: unknown) {
   }
   if (/rate limit|too many/i.test(message)) {
     return "Too many attempts. Wait a minute before requesting another code.";
+  }
+  if (/whatsapp|twilio/i.test(message)) {
+    return message;
+  }
+  if (/phone_otp_codes|0014|not ready/i.test(message)) {
+    return message;
   }
   if (/invalid.*token|token.*expired|otp/i.test(message)) {
     return "That code didn't match or has expired. Request a new one.";

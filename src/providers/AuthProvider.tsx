@@ -30,7 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [adminRole, setAdminRole] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
 
   const loadProfile = useCallback(async (activeSession: Session | null) => {
     if (!activeSession?.user) {
@@ -98,10 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setIsLoading(false);
-      return;
-    }
+    if (!isSupabaseConfigured) return;
     let cancelled = false;
 
     supabase.auth.getSession().then(async ({ data }) => {
@@ -112,7 +109,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, nextSession) => {
+      (event, nextSession) => {
+        // Prevent a flash of "profile missing" while a fresh sign-in loads its
+        // profile for the first time.
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+          setIsLoading(true);
+        }
         setSession(nextSession);
         void loadProfile(nextSession).finally(() => setIsLoading(false));
       },

@@ -31,14 +31,21 @@ Convex dependency.
    - `supabase/migrations/0011_view_once.sql`
    - `supabase/migrations/0012_one_reaction_per_user.sql`
    - `supabase/migrations/0013_status_media_rotation.sql`
+   - `supabase/migrations/0014_whatsapp_otp.sql`
 
     Migration 0007 enables RLS and recreates all public, Storage and Realtime
     policies. Normal browser requests use the publishable key and the user's
     JWT. Do not add a `VITE_` secret key and do not disable RLS for convenience.
 
 4. **Authentication → Providers**
-   - Enable **Phone** and connect an SMS provider (Twilio, Vonage,
-     MessageBird, …).
+   - Enable **Phone** as a fallback provider. The primary PINGO code is sent to
+     **WhatsApp** by `/api/auth/send-otp` and verified by
+     `/api/auth/verify-otp`; if `/api` or WhatsApp delivery is unavailable the
+     client falls back to Supabase's SMS provider.
+   - Enable the **Email** provider. WhatsApp sign-in uses a confirmed,
+     non-deliverable email (`p<digits>@phone.pingo.app`) only as the session
+     holder; the phone number remains the identity. Disabling Email sign-in
+     prevents the session exchange.
    - **Disable Anonymous sign-ins.** PINGO never calls anonymous auth.
    - For testers, add fixed numbers and codes under **Authentication → Phone →
      Test phone numbers**; these create real Supabase users.
@@ -66,6 +73,11 @@ Preview and Development.
 | `TWILIO_API_KEY` | server | for TURN | Twilio API Key SID |
 | `TWILIO_API_SECRET` | server | for TURN | Twilio API Key secret |
 | `TWILIO_TURN_TTL` | server | optional | Credential lifetime, default 3600s |
+| `TWILIO_WHATSAPP_FROM` | server | for WhatsApp sign-in | Approved Twilio WhatsApp sender, e.g. `whatsapp:+14155238886` |
+| `TWILIO_MESSAGING_SERVICE_SID` | server | optional | Alternative to `TWILIO_WHATSAPP_FROM` when the sender lives in a Messaging Service |
+| `TWILIO_WHATSAPP_CONTENT_SID` / `TWILIO_WHATSAPP_CONTENT_VARIABLE` | server | optional | Approved WhatsApp authentication template; the code is passed as the variable |
+| `TWILIO_AUTH_TOKEN` | server | optional | Alternative to the API Key pair for WhatsApp delivery |
+| `OTP_TTL_SECONDS` / `OTP_HASH_SECRET` | server | optional | Code lifetime (default 300s) and digest secret (defaults to the secret key) |
 | `VITE_TURN_URL` / `VITE_TURN_USERNAME` / `VITE_TURN_CREDENTIAL` | client | no | Development-only static fallback. Never use permanent secrets here. |
 
 `VITE_*` values are compiled into the browser bundle. Permanent TURN provider
@@ -95,12 +107,30 @@ vercel
 vercel env add VITE_SUPABASE_URL
 vercel env add VITE_SUPABASE_ANON_KEY
 vercel env add SUPABASE_URL
-vercel env add SUPABASE_ANON_KEY
+vercel env add SUPABASE_SECRET_KEY
 vercel env add TWILIO_ACCOUNT_SID
 vercel env add TWILIO_API_KEY
 vercel env add TWILIO_API_SECRET
+vercel env add TWILIO_WHATSAPP_FROM
 vercel --prod
 ```
+
+### WhatsApp phone sign-in
+
+1. In Twilio, open **Messaging → Try it out → Send a WhatsApp message** and copy
+   the sandbox sender, or use your approved WhatsApp sender. Add it as
+   `TWILIO_WHATSAPP_FROM` (`whatsapp:+…`).
+2. While testing with the sandbox, each tester sends the sandbox join code to the
+   Twilio number from their own WhatsApp once. Production senders instead use an
+   approved authentication template (`TWILIO_WHATSAPP_CONTENT_SID`).
+3. Apply migration `0014_whatsapp_otp.sql`. Codes are stored only as HMAC
+   digests; the table has RLS enabled with no user-facing policy.
+4. Deploy. `POST /api/auth/send-otp` sends the code; `POST /api/auth/verify-otp`
+   verifies it and returns a single-use Supabase token hash. The browser then
+   calls `supabase.auth.verifyOtp`, so the session is a normal Supabase session.
+5. The API surface stays at six routes (limit: nine): `/api/turn`,
+   `/api/media/upload-url`, `/api/messages/send`, `/api/messages/view-once`,
+   `/api/auth/send-otp`, `/api/auth/verify-otp`.
 
 ## 4. TURN credentials (required for strict networks)
 
