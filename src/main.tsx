@@ -7,7 +7,6 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
   });
 }
 import { RequireAdmin, RequireAuth } from "@/components/RequireAuth";
-import { BrandSplash } from "@/components/BrandSplash";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { BrandingProvider } from "@/providers/BrandingProvider";
@@ -107,8 +106,19 @@ const AdminShell = lazy(() =>
   })),
 );
 
+/**
+ * Lazy-route fallback. The branded splash belongs only to startup and session
+ * restoration (Home / RequireAuth), not to every page transition.
+ */
 function RouteLoading() {
-  return <BrandSplash />;
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-background">
+      <span
+        className="size-6 animate-spin rounded-full border-2 border-border border-t-primary"
+        aria-label="Loading"
+      />
+    </div>
+  );
 }
 
 class ToolbarErrorBoundary extends React.Component<

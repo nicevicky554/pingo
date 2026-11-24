@@ -173,7 +173,7 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
-      <aside className="hidden w-[68px] shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar py-3 md:flex">
+      <aside className="liquid-glass-rail hidden w-[68px] shrink-0 flex-col items-center py-3 md:flex">
         <NavLink
           to="/app/chats"
           aria-label="PINGO"
@@ -199,8 +199,8 @@ export function AppShell({
                   cn(
                     "relative flex w-full flex-col items-center gap-1 rounded-md py-2 text-[0.58rem] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isActive
-                      ? "bg-white/45 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:bg-white/10"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                      ? "bg-secondary/70 text-primary"
+                      : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
                   )
                 }
               >
@@ -215,11 +215,13 @@ export function AppShell({
                   ) : (
                     <Icon className="size-[23px]" strokeWidth={1.9} aria-hidden="true" />
                   )}
-                  {badge > 0 && (
+                  {item.to === "/app/updates" && badge > 0 ? (
+                    <span className="absolute -top-0.5 -right-1 size-2 rounded-full bg-primary ring-2 ring-card" />
+                  ) : badge > 0 ? (
                     <span className="absolute -top-1.5 -right-2 min-w-[14px] rounded-full bg-primary px-1 text-center text-[0.52rem] leading-[14px] font-semibold text-primary-foreground">
                       {badge > 99 ? "99+" : badge}
                     </span>
-                  )}
+                  ) : null}
                 </span>
                 <span>{item.label}</span>
               </NavLink>
@@ -287,11 +289,13 @@ export function AppShell({
                 ) : (
                   <Icon className="size-[20px]" strokeWidth={1.9} aria-hidden="true" />
                 )}
-                {badge > 0 && (
+                {item.to === "/app/updates" && badge > 0 ? (
+                  <span className="absolute -top-0.5 -right-1 size-2 rounded-full bg-primary ring-2 ring-card" />
+                ) : badge > 0 ? (
                   <span className="absolute -top-1.5 -right-2.5 min-w-[15px] rounded-full bg-primary px-1 text-center text-[0.55rem] leading-[15px] font-semibold text-primary-foreground shadow-sm">
                     {badge > 99 ? "99+" : badge}
                   </span>
-                )}
+                ) : null}
               </span>
               <span>{item.label}</span>
             </NavLink>

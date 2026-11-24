@@ -1,49 +1,35 @@
 import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
-import { startDirectConversation } from "@/lib/chat";
+import { sendMessage, startDirectConversation } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
 import { watchChannel } from "@/lib/realtime";
-import type { Channel, Profile, StatusUpdate } from "@/lib/types";
+import type { Profile, StatusUpdate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   ArrowRight,
-  Camera,
-  Check,
+  ChevronRight,
   Eye,
-  ImagePlus,
   Loader2,
   Lock,
   MessageCircle,
   Plus,
   Radio,
-  Send,
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
-const BACKGROUNDS = [
-  "#126B78",
-  "#1F8A7A",
-  "#2C5F8A",
-  "#6B4A72",
-  "#87503F",
-  "#2F6B4F",
-  "#26313A",
-];
+const QUICK_REACTIONS = ["❤️", "😂", "😮", "😢", "👍"];
 
 type StatusGroup = {
   profile: Profile;
@@ -51,12 +37,21 @@ type StatusGroup = {
   allSeen: boolean;
 };
 
+type ViewerRow = {
+  viewer_id: string;
+  viewed_at: string;
+  profile: Profile | null;
+};
+
 function useSignedStatus(path: string | null) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    if (!path) return;
-    supabase.storage
+    if (!path) {
+      setUrl(null);
+      return;
+    }
+    void supabase.storage
       .from("status-media")
       .createSignedUrl(path, 3600)
       .then(({ data }) => {
@@ -69,27 +64,48 @@ function useSignedStatus(path: string | null) {
   return url;
 }
 
-function StatusVisual({ status }: { status: StatusUpdate }) {
+function StatusVisual({
+  status,
+  paused,
+  onEnded,
+}: {
+  status: StatusUpdate;
+  paused: boolean;
+  onEnded: () => void;
+}) {
   const url = useSignedStatus(status.media_path);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (paused) video.pause();
+    else void video.play().catch(() => undefined);
+  }, [paused]);
+
   if (status.kind === "text" || !status.media_path) {
     return (
       <div
-        className="flex size-full items-center justify-center p-10 text-center"
-        style={{ backgroundColor: status.background ?? "#126B78" }}
+        className="flex size-full items-center justify-center px-8 py-16 text-center"
+        style={{ backgroundColor: status.background ?? "#0F5F63" }}
       >
-        <p className="max-w-lg text-2xl leading-snug font-bold text-white whitespace-pre-wrap">
+        <p className="max-w-lg text-[1.6rem] leading-snug font-semibold text-white whitespace-pre-wrap">
           {status.body}
         </p>
       </div>
     );
   }
+
   const rotation = status.rotation ?? 0;
+
   if (status.kind === "video") {
     return url ? (
       <video
+        ref={videoRef}
         src={url}
-        controls
         autoPlay
+        playsInline
+        onEnded={onEnded}
         className="size-full object-contain"
         style={{ transform: `rotate(${rotation}deg)` }}
       />
@@ -99,6 +115,7 @@ function StatusVisual({ status }: { status: StatusUpdate }) {
       </div>
     );
   }
+
   return url ? (
     <img
       src={url}
@@ -120,20 +137,13 @@ export default function UpdatesPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [viewed, setViewed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [viewerGroup, setViewerGroup] = useState<StatusGroup | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [followed, setFollowed] = useState<Set<string>>(new Set());
-  const [channelOpen, setChannelOpen] = useState<Channel | null>(null);
-  const [channelError, setChannelError] = useState<string | null>(null);
-  const [createChannelOpen, setCreateChannelOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!profileId) return;
-    setLoading(true);
     const { data: rows } = await supabase
       .from("status_updates")
       .select("*")
@@ -149,30 +159,17 @@ export default function UpdatesPage() {
         .select("*")
         .in("id", userIds);
       setProfiles(
-        Object.fromEntries(((people ?? []) as Profile[]).map((item) => [item.id, item])),
+        Object.fromEntries(
+          ((people ?? []) as Profile[]).map((item) => [item.id, item]),
+        ),
       );
     }
 
     const { data: views } = await supabase
       .from("status_views")
-      .select("status_id,viewer_id")
+      .select("status_id")
       .eq("viewer_id", profileId);
     setViewed(new Set((views ?? []).map((row) => row.status_id)));
-
-    const { data: publicChannels } = await supabase
-      .from("channels")
-      .select("*")
-      .eq("is_public", true)
-      .order("created_at", { ascending: false })
-      .limit(12);
-    setChannels((publicChannels ?? []) as Channel[]);
-
-    const { data: memberships } = await supabase
-      .from("channel_members")
-      .select("channel_id")
-      .eq("user_id", profileId);
-    setFollowed(new Set((memberships ?? []).map((row) => row.channel_id)));
-
     setLoading(false);
   }, [profileId]);
 
@@ -203,7 +200,10 @@ export default function UpdatesPage() {
     const byUser = new Map<string, StatusUpdate[]>();
     for (const status of statuses) {
       if (status.user_id === profile?.id) continue;
-      byUser.set(status.user_id, [...(byUser.get(status.user_id) ?? []), status]);
+      byUser.set(status.user_id, [
+        ...(byUser.get(status.user_id) ?? []),
+        status,
+      ]);
     }
     return Array.from(byUser.entries())
       .filter(([userId]) => profiles[userId])
@@ -212,7 +212,12 @@ export default function UpdatesPage() {
         statuses: items,
         allSeen: items.every((item) => viewed.has(item.id)),
       }))
-      .sort((a, b) => Number(a.allSeen) - Number(b.allSeen));
+      .sort((a, b) => {
+        if (a.allSeen !== b.allSeen) return a.allSeen ? 1 : -1;
+        const aTime = a.statuses[a.statuses.length - 1].created_at;
+        const bTime = b.statuses[b.statuses.length - 1].created_at;
+        return bTime.localeCompare(aTime);
+      });
   }, [statuses, profile?.id, profiles, viewed]);
 
   useEffect(() => {
@@ -223,7 +228,7 @@ export default function UpdatesPage() {
         ? mine.length > 0
           ? { profile, statuses: mine, allSeen: true }
           : null
-        : groups.find((group) => group.profile.id === requested) ?? null;
+        : (groups.find((group) => group.profile.id === requested) ?? null);
     if (target) {
       setViewerGroup(target);
       setViewerIndex(0);
@@ -234,15 +239,19 @@ export default function UpdatesPage() {
   }, [groups, loading, mine, profile, searchParams, setSearchParams]);
 
   async function recordView(status: StatusUpdate) {
-    if (!profile || viewed.has(status.id)) return;
+    if (!profile || status.user_id === profile.id || viewed.has(status.id)) return;
     setViewed((current) => new Set(current).add(status.id));
-    await supabase
-      .from("status_views")
-      .insert({ status_id: status.id, viewer_id: profile.id });
+    await supabase.from("status_views").upsert(
+      { status_id: status.id, viewer_id: profile.id },
+      { onConflict: "status_id,viewer_id", ignoreDuplicates: true },
+    );
   }
 
   async function deleteStatus(status: StatusUpdate) {
     if (!window.confirm("Delete this status?")) return;
+    if (status.media_path) {
+      await supabase.storage.from("status-media").remove([status.media_path]);
+    }
     await supabase
       .from("status_updates")
       .delete()
@@ -250,28 +259,6 @@ export default function UpdatesPage() {
       .eq("user_id", profile?.id ?? "");
     setViewerGroup(null);
     void load();
-  }
-
-  async function toggleFollow(channel: Channel) {
-    if (!profile) return;
-    const isFollowing = followed.has(channel.id);
-    if (isFollowing) {
-      await supabase
-        .from("channel_members")
-        .delete()
-        .eq("channel_id", channel.id)
-        .eq("user_id", profile.id);
-      setFollowed((current) => {
-        const next = new Set(current);
-        next.delete(channel.id);
-        return next;
-      });
-    } else {
-      const { error } = await supabase
-        .from("channel_members")
-        .insert({ channel_id: channel.id, user_id: profile.id });
-      if (!error) setFollowed((current) => new Set(current).add(channel.id));
-    }
   }
 
   if (!profile) return null;
@@ -308,418 +295,202 @@ export default function UpdatesPage() {
         </Button>
       </header>
 
-      <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-        {/* My status */}
-        <section>
-          <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
-            My status
-          </h2>
-          <div className="mt-3 flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-            <button
-              type="button"
-              onClick={() => {
-                if (mine.length > 0) {
-                  setViewerGroup({
-                    profile: { ...profile },
-                    statuses: mine,
-                    allSeen: true,
-                  });
-                  setViewerIndex(0);
-                  void recordView(mine[0]);
-                } else {
-                  navigate("/app/updates/create");
-                }
-              }}
-              className="relative"
-              aria-label={mine.length ? "View my status" : "Add a status"}
-            >
-              <UserAvatar profile={profile} size="lg" ring={mine.length ? "own" : null} />
-              {mine.length === 0 ? (
-                <span className="absolute -right-0.5 -bottom-0.5 flex size-5 items-center justify-center rounded-full border-2 border-card bg-primary text-primary-foreground">
-                  <Plus className="size-3" />
-                </span>
-              ) : (
-                <span className="absolute -right-0.5 -bottom-0.5 flex size-5 items-center justify-center rounded-full border-2 border-card bg-primary text-[0.6rem] font-bold text-primary-foreground">
-                  {mine.length}
-                </span>
-              )}
-            </button>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold">My status</p>
-              <p className="text-xs text-muted-foreground">
-                {mine.length > 0
-                  ? `${mine.length} update${mine.length > 1 ? "s" : ""} · tap to preview`
-                  : "Share a text or photo update"}
-              </p>
-            </div>
-            {mine.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive"
-                onClick={() => void deleteStatus(mine[mine.length - 1])}
-              >
-                <Trash2 className="size-4" /> Delete latest
-              </Button>
+      <div className="mx-auto w-full max-w-2xl">
+        <button
+          type="button"
+          onClick={() => {
+            if (mine.length > 0) {
+              setViewerGroup({ profile, statuses: mine, allSeen: true });
+              setViewerIndex(0);
+            } else {
+              navigate("/app/updates/create");
+            }
+          }}
+          className="flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-secondary/60"
+        >
+          <span className="relative shrink-0">
+            <UserAvatar
+              profile={profile}
+              size="lg"
+              ring={mine.length > 0 ? "own" : null}
+            />
+            {mine.length === 0 ? (
+              <span className="absolute -right-0.5 -bottom-0.5 flex size-5 items-center justify-center rounded-full border-2 border-background bg-primary text-primary-foreground">
+                <Plus className="size-3" />
+              </span>
+            ) : null}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[0.92rem] font-semibold">
+              My status
+            </span>
+            <span className="mt-0.5 block truncate text-[0.75rem] text-muted-foreground">
+              {mine.length > 0
+                ? `${mine.length} update${mine.length > 1 ? "s" : ""} · ${new Date(
+                    mine[mine.length - 1].created_at,
+                  ).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : "Tap to add a text, photo or video status"}
+            </span>
+          </span>
+          {mine.length > 0 ? (
+            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[0.62rem] font-semibold text-primary">
+              {mine.length}
+            </span>
+          ) : null}
+        </button>
+
+        <div className="mt-1 border-y border-border bg-card">
+          <div className="flex items-center justify-between px-4 pt-3 pb-1">
+            <h2 className="text-[0.65rem] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+              Recent updates
+            </h2>
+            {groups.some((group) => !group.allSeen) && (
+              <span className="text-[0.62rem] font-medium text-primary">
+                {groups.filter((group) => !group.allSeen).length} new
+              </span>
             )}
           </div>
-        </section>
 
-        {/* Recent updates */}
-        <section className="mt-8">
-          <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
-            Recent updates
-          </h2>
           {loading ? (
             <div className="flex justify-center py-10">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : groups.length === 0 ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border bg-card/50 px-6 py-10 text-center">
-              <p className="text-sm font-semibold">No updates yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Statuses from people you're connected to will appear here.
+            <div className="px-6 py-10 text-center">
+              <p className="text-sm font-medium">No recent updates</p>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-muted-foreground">
+                Status updates from people you're connected to appear here for
+                24 hours.
               </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={() => navigate("/app/updates/create")}
+              >
+                <Plus className="size-3.5" /> Add a status
+              </Button>
             </div>
           ) : (
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {groups.map((group) => (
-                <button
-                  key={group.profile.id}
-                  type="button"
-                  onClick={() => {
-                    setViewerGroup(group);
-                    setViewerIndex(0);
-                    void recordView(group.statuses[0]);
-                  }}
-                  className="flex items-center gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/40"
-                >
-                  <UserAvatar
-                    profile={group.profile}
-                    size="lg"
-                    ring={group.allSeen ? "viewed" : "unseen"}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold">
-                      {group.profile.display_name || group.profile.username}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {group.statuses.length} update
-                      {group.statuses.length > 1 ? "s" : ""} ·{" "}
-                      {new Date(
-                        group.statuses[group.statuses.length - 1].created_at,
-                      ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                  </div>
-                  {group.allSeen && <Check className="size-4 text-muted-foreground" />}
-                </button>
-              ))}
-            </div>
+            <ul className="divide-y divide-border/70">
+              {groups.map((group) => {
+                const latest = group.statuses[group.statuses.length - 1];
+                return (
+                  <li key={group.profile.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewerGroup(group);
+                        setViewerIndex(0);
+                        void recordView(group.statuses[0]);
+                      }}
+                      className="flex w-full items-center gap-3.5 px-4 py-2.5 text-left transition-colors hover:bg-secondary/60"
+                    >
+                      <UserAvatar
+                        profile={group.profile}
+                        size="md"
+                        ring={group.allSeen ? "viewed" : "unseen"}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[0.9rem] font-medium">
+                          {group.profile.display_name ||
+                            group.profile.username}
+                        </span>
+                        <span className="mt-0.5 block text-[0.72rem] text-muted-foreground">
+                          {new Date(latest.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          {group.statuses.length > 1
+                            ? ` · ${group.statuses.length} updates`
+                            : " · 1 update"}
+                        </span>
+                      </span>
+                      {!group.allSeen && (
+                        <span className="size-2 shrink-0 rounded-full bg-primary" />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </section>
+        </div>
 
-        {/* Channels */}
-        <section className="mt-10">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
-              Channels to follow
-            </h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate("/app/channels/create")}
-              className="gap-1.5"
-            >
-              <Plus className="size-4" /> Create
-            </Button>
-          </div>
-
-          {channelError && (
-            <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {channelError}
-            </p>
-          )}
-
-          {channels.length === 0 ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border bg-card/50 px-6 py-8 text-center">
-              <p className="text-sm font-semibold">No public channels yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Create the first one and invite people to follow it.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-3 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-              {channels.map((channel) => (
-                <div key={channel.id} className="flex items-center gap-3 p-3.5">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <Radio className="size-5" />
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/app/channels/${channel.id}`)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <p className="truncate text-sm font-bold">{channel.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      @{channel.username}
-                      {channel.description ? ` · ${channel.description}` : ""}
-                    </p>
-                  </button>
-                  <Button
-                    size="sm"
-                    variant={followed.has(channel.id) ? "ghost" : "outline"}
-                    onClick={() => void toggleFollow(channel)}
-                  >
-                    {followed.has(channel.id) ? (
-                      <>
-                        <Check className="size-3.5" /> Following
-                      </>
-                    ) : (
-                      "Follow"
-                    )}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <Link
+          to="/app/channels"
+          className="flex items-center gap-3.5 px-4 py-4 transition-colors hover:bg-secondary/60"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+            <Radio className="size-[18px]" strokeWidth={1.8} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[0.88rem] font-medium">
+              Discover channels
+            </span>
+            <span className="block text-[0.72rem] text-muted-foreground">
+              Broadcast feeds you can follow
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        </Link>
       </div>
-
-      <CreateStatusDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        userId={profile.id}
-        onCreated={() => {
-          setCreateOpen(false);
-          void load();
-        }}
-      />
 
       {viewerGroup && (
         <StatusViewer
           group={viewerGroup}
           index={viewerIndex}
+          currentUserId={profile.id}
           onIndexChange={(next) => {
             setViewerIndex(next);
             void recordView(viewerGroup.statuses[next]);
           }}
           onClose={() => setViewerGroup(null)}
+          onOpenProfile={(userId) => {
+            setViewerGroup(null);
+            navigate(`/app/profile/${userId}`);
+          }}
           isMine={viewerGroup.profile.id === profile.id}
           onDelete={() => void deleteStatus(viewerGroup.statuses[viewerIndex])}
           onReply={async (message) => {
             const conversationId = await startDirectConversation(
               viewerGroup.profile.id,
             );
-            await supabase.from("messages").insert({
-              conversation_id: conversationId,
-              sender_id: profile.id,
+            // Uses the same insert + verified server fallback as every other
+            // message, so a status reply cannot silently fail on RLS.
+            await sendMessage({
+              conversationId,
+              senderId: profile.id,
               body: message,
             });
             setViewerGroup(null);
           }}
         />
       )}
-
-      {channelOpen && (
-        <ChannelSheet
-          channel={channelOpen}
-          currentUserId={profile.id}
-          following={followed.has(channelOpen.id)}
-          onToggleFollow={() => void toggleFollow(channelOpen)}
-          onClose={() => setChannelOpen(null)}
-        />
-      )}
-
-      <CreateChannelDialog
-        open={createChannelOpen}
-        onOpenChange={setCreateChannelOpen}
-        userId={profile.id}
-        onCreated={(error) => {
-          if (error) {
-            setChannelError(error);
-            return;
-          }
-          setCreateChannelOpen(false);
-          void load();
-        }}
-      />
     </div>
-  );
-}
-
-function CreateStatusDialog({
-  open,
-  onOpenChange,
-  userId,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  userId: string;
-  onCreated: () => void;
-}) {
-  const [text, setText] = useState("");
-  const [background, setBackground] = useState(BACKGROUNDS[0]);
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open) {
-      setText("");
-      setFile(null);
-      setPreviewUrl(null);
-      setError(null);
-    }
-  }, [open]);
-
-  async function submit() {
-    if (!text.trim() && !file) {
-      setError("Add a caption or a photo first.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      let mediaPath: string | null = null;
-      let kind: "text" | "image" | "video" = "text";
-      if (file) {
-        kind = file.type.startsWith("video/") ? "video" : "image";
-        const extension = file.name.split(".").pop() ?? "jpg";
-        mediaPath = `${userId}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage
-          .from("status-media")
-          .upload(mediaPath, file, { contentType: file.type });
-        if (uploadError) throw uploadError;
-      }
-      const { error: insertError } = await supabase
-        .from("status_updates")
-        .insert({
-          user_id: userId,
-          kind,
-          body: text.trim() || null,
-          media_path: mediaPath,
-          background,
-          caption: text.trim() || null,
-        });
-      if (insertError) throw insertError;
-      onCreated();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Status could not be posted.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add a status</DialogTitle>
-          <DialogDescription>
-            It disappears automatically after 24 hours.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div
-          className="flex min-h-44 items-center justify-center overflow-hidden rounded-xl p-6"
-          style={{ backgroundColor: file ? "#101C25" : background }}
-        >
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="Status preview"
-              className="max-h-64 rounded-lg object-contain"
-            />
-          ) : (
-            <Textarea
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder="Write something worth sharing…"
-              maxLength={280}
-              className="min-h-24 resize-none border-0 bg-transparent text-center text-lg font-bold text-white placeholder:text-white/60 focus-visible:ring-0"
-            />
-          )}
-        </div>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*,video/*"
-          className="hidden"
-          onChange={(event) => {
-            const next = event.target.files?.[0];
-            if (!next) return;
-            if (next.size > 25 * 1024 * 1024) {
-              setError("Status media must be smaller than 25 MB.");
-              return;
-            }
-            setFile(next);
-            setPreviewUrl(URL.createObjectURL(next));
-          }}
-        />
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => inputRef.current?.click()}
-            className="gap-1.5"
-          >
-            <ImagePlus className="size-4" /> Photo or video
-          </Button>
-          {!file &&
-            BACKGROUNDS.map((colour) => (
-              <button
-                key={colour}
-                type="button"
-                onClick={() => setBackground(colour)}
-                aria-label={`Use background ${colour}`}
-                className={cn(
-                  "size-6 rounded-full border-2",
-                  background === colour ? "border-foreground" : "border-transparent",
-                )}
-                style={{ backgroundColor: colour }}
-              />
-            ))}
-        </div>
-
-        {error && (
-          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
-            {error}
-          </p>
-        )}
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => void submit()} disabled={saving}>
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            Post status
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
 function StatusViewer({
   group,
   index,
+  currentUserId,
   onIndexChange,
   onClose,
+  onOpenProfile,
   isMine,
   onDelete,
   onReply,
 }: {
   group: StatusGroup;
   index: number;
+  currentUserId: string;
   onIndexChange: (index: number) => void;
   onClose: () => void;
+  onOpenProfile: (userId: string) => void;
   isMine: boolean;
   onDelete: () => void;
   onReply: (message: string) => Promise<void>;
@@ -728,70 +499,187 @@ function StatusViewer({
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [reaction, setReaction] = useState<string | null>(null);
+  const [viewers, setViewers] = useState<ViewerRow[]>([]);
+  const [viewersOpen, setViewersOpen] = useState(false);
+  const [viewersLoading, setViewersLoading] = useState(false);
+  const touchStart = useRef<number | null>(null);
+
+  const advance = useCallback(() => {
+    if (index < group.statuses.length - 1) onIndexChange(index + 1);
+    else onClose();
+  }, [group.statuses.length, index, onClose, onIndexChange]);
+
+  useEffect(() => {
+    setPaused(false);
+    setViewersOpen(false);
+  }, [status.id]);
 
   useEffect(() => {
     if (paused) return;
-    const timer = window.setTimeout(() => {
-      if (index < group.statuses.length - 1) onIndexChange(index + 1);
-      else onClose();
-    }, 6000);
+    if (status.kind === "video" && status.media_path) return;
+    const timer = window.setTimeout(advance, 6000);
     return () => window.clearTimeout(timer);
-  }, [index, group.statuses.length, onIndexChange, onClose, paused]);
+  }, [index, paused, status.id, status.kind, status.media_path, advance]);
+
+  useEffect(() => {
+    if (!isMine) return;
+    let active = true;
+    setViewersLoading(true);
+    void (async () => {
+      const { data } = await supabase
+        .from("status_views")
+        .select("viewer_id,viewed_at")
+        .eq("status_id", status.id)
+        .order("viewed_at", { ascending: false });
+      const rows = data ?? [];
+      const ids = rows.map((row) => row.viewer_id);
+      let people: Profile[] = [];
+      if (ids.length > 0) {
+        const { data: profiles } = await supabase
+          .from("public_profiles")
+          .select("*")
+          .in("id", ids);
+        people = (profiles ?? []) as Profile[];
+      }
+      const byId = new Map(people.map((person) => [person.id, person]));
+      if (active) {
+        setViewers(
+          rows.map((row) => ({
+            viewer_id: row.viewer_id,
+            viewed_at: row.viewed_at,
+            profile: byId.get(row.viewer_id) ?? null,
+          })),
+        );
+        setViewersLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [isMine, status.id]);
+
+  async function react(emoji: string) {
+    if (reaction === emoji) {
+      setReaction(null);
+      await supabase
+        .from("status_reactions")
+        .delete()
+        .match({ status_id: status.id, user_id: currentUserId });
+      return;
+    }
+    setReaction(emoji);
+    // Delete-then-insert avoids requiring SELECT on other viewers' reactions
+    // (the read policy is owner-only).
+    await supabase
+      .from("status_reactions")
+      .delete()
+      .match({ status_id: status.id, user_id: currentUserId });
+    await supabase.from("status_reactions").insert({
+      status_id: status.id,
+      user_id: currentUserId,
+      emoji,
+    });
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#0A141B]">
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-[#0A141B]"
+      onTouchStart={(event) => {
+        if ((event.target as HTMLElement).closest("input,textarea,button")) {
+          touchStart.current = null;
+          return;
+        }
+        touchStart.current = event.touches[0].clientY;
+      }}
+      onTouchEnd={(event) => {
+        if (touchStart.current == null) return;
+        const delta = event.changedTouches[0].clientY - touchStart.current;
+        touchStart.current = null;
+        if (delta > 90) onClose();
+      }}
+    >
       <div className="flex gap-1 px-3 pt-3">
         {group.statuses.map((item, position) => (
           <span
             key={item.id}
             className={cn(
-              "h-[3px] flex-1 rounded-full",
-              position <= index ? "bg-white" : "bg-white/25",
+              "h-[3px] flex-1 overflow-hidden rounded-full bg-white/25",
+              position < index && "bg-white",
             )}
-          />
+          >
+            {position === index && (
+              <span
+                className="block h-full w-full origin-left animate-[status-progress_6s_linear_forwards] bg-white"
+                style={{ animationPlayState: paused ? "paused" : "running" }}
+              />
+            )}
+          </span>
         ))}
       </div>
 
-      <div className="flex items-center gap-3 px-4 py-3">
-        <UserAvatar profile={group.profile} size="sm" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold text-white">
-            {group.profile.display_name || group.profile.username}
-          </p>
-          <p className="text-[0.68rem] text-white/60">
-            {new Date(status.created_at).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </p>
-        </div>
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <button
+          type="button"
+          onClick={() => onOpenProfile(group.profile.id)}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        >
+          <UserAvatar profile={group.profile} size="sm" />
+          <span className="min-w-0">
+            <span className="block truncate text-[0.84rem] font-semibold text-white">
+              {group.profile.display_name || group.profile.username}
+            </span>
+            <span className="block text-[0.64rem] text-white/60">
+              {new Date(status.created_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          </span>
+        </button>
         {isMine && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onDelete}
-            aria-label="Delete status"
-            className="text-white hover:bg-white/10"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2 text-white/80 hover:bg-white/10 hover:text-white"
+              onClick={() => setViewersOpen((open) => !open)}
+            >
+              <Eye className="size-4" /> {viewers.length}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onDelete}
+              aria-label="Delete status"
+              className="size-8 text-white hover:bg-white/10"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </>
         )}
         <Button
           variant="ghost"
           size="icon"
           onClick={onClose}
           aria-label="Close status viewer"
-          className="text-white hover:bg-white/10"
+          className="size-8 text-white hover:bg-white/10"
         >
           <X className="size-5" />
         </Button>
       </div>
 
       <div
-        className="relative flex min-h-0 flex-1 items-center justify-center"
-        onClick={() => setPaused((value) => !value)}
+        className="relative min-h-0 flex-1 overflow-hidden"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - rect.left) / rect.width;
+          if (ratio < 0.3 && index > 0) onIndexChange(index - 1);
+          else if (ratio > 0.7) advance();
+          else setPaused((value) => !value);
+        }}
       >
-        <StatusVisual status={status} />
+        <StatusVisual status={status} paused={paused} onEnded={advance} />
 
         {index > 0 && (
           <button
@@ -801,322 +689,157 @@ function StatusViewer({
               event.stopPropagation();
               onIndexChange(index - 1);
             }}
-            className="absolute top-1/2 left-2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white"
+            className="absolute top-1/2 left-1 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white/90"
           >
             <ArrowLeft className="size-5" />
           </button>
         )}
-        {(index < group.statuses.length - 1 || !isMine) && (
-          <button
-            type="button"
-            aria-label="Next status"
-            onClick={(event) => {
-              event.stopPropagation();
-              if (index < group.statuses.length - 1) onIndexChange(index + 1);
-              else onClose();
-            }}
-            className="absolute top-1/2 right-2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white"
-          >
-            <ArrowRight className="size-5" />
-          </button>
+        <button
+          type="button"
+          aria-label="Next status"
+          onClick={(event) => {
+            event.stopPropagation();
+            advance();
+          }}
+          className="absolute top-1/2 right-1 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white/90"
+        >
+          <ArrowRight className="size-5" />
+        </button>
+
+        {paused && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/15">
+            <span className="flex size-14 items-center justify-center rounded-full bg-black/45 text-white">
+              ▶
+            </span>
+          </span>
         )}
 
         {status.caption && status.media_path && (
-          <p className="absolute inset-x-8 bottom-4 rounded-lg bg-black/50 px-4 py-2 text-center text-sm text-white backdrop-blur">
+          <p className="absolute inset-x-4 bottom-3 rounded-xl bg-black/55 px-4 py-2 text-center text-sm leading-6 text-white backdrop-blur">
             {status.caption}
           </p>
+        )}
+
+        {isMine && viewersOpen && (
+          <div
+            className="absolute inset-x-0 bottom-0 max-h-64 overflow-y-auto rounded-t-2xl bg-[#101820]/95 px-4 pt-3 pb-4 backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2">
+              <p className="text-sm font-semibold text-white">
+                Viewed by {viewers.length}
+              </p>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setViewersOpen(false);
+                }}
+                className="text-white/60 hover:text-white"
+                aria-label="Close viewers"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            {viewersLoading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="size-4 animate-spin text-white/70" />
+              </div>
+            ) : viewers.length === 0 ? (
+              <p className="py-6 text-center text-xs text-white/60">
+                No views yet.
+              </p>
+            ) : (
+              <ul className="divide-y divide-white/10">
+                {viewers.map((row) => (
+                  <li
+                    key={row.viewer_id}
+                    className="flex items-center gap-2.5 py-2"
+                  >
+                    <UserAvatar profile={row.profile} size="xs" />
+                    <span className="min-w-0 flex-1 truncate text-[0.82rem] text-white">
+                      {row.profile?.display_name ||
+                        row.profile?.username ||
+                        "PINGO user"}
+                    </span>
+                    <span className="shrink-0 text-[0.62rem] text-white/50">
+                      {new Date(row.viewed_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
 
       {isMine ? (
-        <div className="flex items-center justify-center gap-6 px-4 py-4 text-white/80">
-          <span className="inline-flex items-center gap-1.5 text-xs">
-            <Eye className="size-4" /> Viewers are recorded in the database
-          </span>
+        <div className="px-4 py-3 text-center text-[0.68rem] text-white/55">
+          Only you can see who viewed this status.
         </div>
       ) : (
-        <div className="flex items-center gap-2 px-3 py-3">
-          <Input
-            value={reply}
-            onChange={(event) => setReply(event.target.value)}
-            placeholder="Reply to this status…"
-            className="h-10 border-white/20 bg-white/10 text-white placeholder:text-white/50"
-          />
-          <Button
-            size="icon"
-            aria-label="Send status reply"
-            disabled={!reply.trim() || sending}
-            onClick={async () => {
-              if (!reply.trim()) return;
-              setSending(true);
-              try {
-                await onReply(reply.trim());
-                setReply("");
-              } finally {
-                setSending(false);
-              }
-            }}
-          >
-            {sending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <MessageCircle className="size-4" />
-            )}
-          </Button>
+        <div className="px-3 pt-2 pb-3">
+          <div className="mb-2 flex items-center justify-center gap-2">
+            {QUICK_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => void react(emoji)}
+                aria-label={`React ${emoji}`}
+                className={cn(
+                  "flex size-9 items-center justify-center rounded-full text-lg transition-transform",
+                  reaction === emoji
+                    ? "scale-110 bg-white/25"
+                    : "bg-white/10 hover:bg-white/20",
+                )}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              value={reply}
+              onChange={(event) => setReply(event.target.value)}
+              placeholder="Reply privately…"
+              className="h-10 border-white/20 bg-white/10 text-white placeholder:text-white/50"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && reply.trim() && !sending) {
+                  event.preventDefault();
+                  setSending(true);
+                  void onReply(reply.trim())
+                    .then(() => setReply(""))
+                    .finally(() => setSending(false));
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              aria-label="Send status reply"
+              disabled={!reply.trim() || sending}
+              onClick={async () => {
+                if (!reply.trim()) return;
+                setSending(true);
+                try {
+                  await onReply(reply.trim());
+                  setReply("");
+                } finally {
+                  setSending(false);
+                }
+              }}
+            >
+              {sending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <MessageCircle className="size-4" />
+              )}
+            </Button>
+          </div>
         </div>
       )}
     </div>
-  );
-}
-
-function ChannelSheet({
-  channel,
-  currentUserId,
-  following,
-  onToggleFollow,
-  onClose,
-}: {
-  channel: Channel;
-  currentUserId: string;
-  following: boolean;
-  onToggleFollow: () => void;
-  onClose: () => void;
-}) {
-  const [posts, setPosts] = useState<
-    { id: string; body: string | null; created_at: string; author_id: string; pinned: boolean }[]
-  >([]);
-  const [draft, setDraft] = useState("");
-  const [canPost, setCanPost] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    const { data } = await supabase
-      .from("channel_posts")
-      .select("id,body,created_at,author_id,pinned")
-      .eq("channel_id", channel.id)
-      .order("created_at", { ascending: false })
-      .limit(30);
-    setPosts(data ?? []);
-
-    const { data: membership } = await supabase
-      .from("channel_members")
-      .select("role")
-      .eq("channel_id", channel.id)
-      .eq("user_id", currentUserId)
-      .maybeSingle();
-    setCanPost(
-      channel.owner_id === currentUserId ||
-        membership?.role === "owner" ||
-        membership?.role === "admin",
-    );
-    setLoading(false);
-  }, [channel.id, channel.owner_id, currentUserId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function publish() {
-    if (!draft.trim()) return;
-    const { error: insertError } = await supabase.from("channel_posts").insert({
-      channel_id: channel.id,
-      author_id: currentUserId,
-      body: draft.trim(),
-    });
-    if (insertError) {
-      setError(insertError.message);
-      return;
-    }
-    setDraft("");
-    await load();
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Radio className="size-5 text-primary" /> {channel.name}
-          </DialogTitle>
-          <DialogDescription>
-            @{channel.username}
-            {channel.description ? ` · ${channel.description}` : ""}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex gap-2">
-          <Button size="sm" variant={following ? "ghost" : "outline"} onClick={onToggleFollow}>
-            {following ? "Following" : "Follow channel"}
-          </Button>
-        </div>
-
-        {canPost && (
-          <div className="rounded-lg border border-border bg-muted/40 p-2">
-            <Textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Post to this channel…"
-              rows={2}
-              maxLength={1000}
-            />
-            <div className="mt-2 flex justify-end">
-              <Button size="sm" onClick={() => void publish()} disabled={!draft.trim()}>
-                <Send className="size-4" /> Publish
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {error}
-          </p>
-        )}
-
-        <div className="max-h-72 space-y-2 overflow-y-auto">
-          {loading ? (
-            <div className="flex justify-center py-6">
-              <Loader2 className="size-4 animate-spin text-muted-foreground" />
-            </div>
-          ) : posts.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No posts yet.
-            </p>
-          ) : (
-            posts.map((post) => (
-              <div key={post.id} className="rounded-lg border border-border bg-card p-3">
-                <p className="text-sm leading-6 whitespace-pre-wrap">{post.body}</p>
-                <p className="mt-2 text-[0.65rem] text-muted-foreground">
-                  {new Date(post.created_at).toLocaleString()}
-                </p>
-              </div>
-            ))
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function CreateChannelDialog({
-  open,
-  onOpenChange,
-  userId,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  userId: string;
-  onCreated: (error?: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [username, setUsername] = useState("");
-  const [description, setDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      setName("");
-      setUsername("");
-      setDescription("");
-      setError(null);
-    }
-  }, [open]);
-
-  async function submit() {
-    if (name.trim().length < 2 || !/^[a-z0-9_]{3,32}$/.test(username)) {
-      setError("Add a name and a username of 3–32 lowercase characters.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const { data, error: insertError } = await supabase
-      .from("channels")
-      .insert({
-        owner_id: userId,
-        name: name.trim(),
-        username,
-        description: description.trim() || null,
-        is_public: true,
-      })
-      .select("id")
-      .single();
-    if (insertError) {
-      const message =
-        insertError.code === "23505"
-          ? "That channel username is already taken."
-          : insertError.message;
-      setError(message);
-      setSaving(false);
-      return;
-    }
-    const { error: memberError } = await supabase.from("channel_members").insert({
-      channel_id: data.id,
-      user_id: userId,
-      role: "owner",
-    });
-    setSaving(false);
-    if (memberError) {
-      setError(memberError.message);
-      return;
-    }
-    onCreated();
-    onOpenChange(false);
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create a channel</DialogTitle>
-          <DialogDescription>
-            A public broadcast feed people can follow.
-          </DialogDescription>
-        </DialogHeader>
-        <Input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Channel name"
-          maxLength={60}
-        />
-        <div className="flex items-center rounded-lg border border-input px-3">
-          <span className="text-sm text-muted-foreground">@</span>
-          <Input
-            value={username}
-            onChange={(event) =>
-              setUsername(
-                event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-              )
-            }
-            placeholder="channel_username"
-            maxLength={32}
-            className="border-0 shadow-none focus-visible:ring-0"
-          />
-        </div>
-        <Textarea
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="What is this channel about?"
-          rows={2}
-          maxLength={200}
-        />
-        {error && (
-          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {error}
-          </p>
-        )}
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => void submit()} disabled={saving}>
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Radio className="size-4" />}
-            Create channel
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

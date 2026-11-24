@@ -28,7 +28,7 @@ import {
   signedMediaUrl,
   uploadChatAttachment,
 } from "@/lib/chat";
-import { dayLabel, lastSeenLabel, timeOf } from "@/lib/format";
+import { dayLabel } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 import { freshPrivateChannel } from "@/lib/realtime";
 import { Link, useNavigate } from "react-router";
@@ -42,7 +42,6 @@ import { usePresence } from "@/providers/PresenceProvider";
 import { useCall } from "@/providers/CallProvider";
 import { useAuth } from "@/hooks/use-auth";
 import { useStatusRings } from "@/hooks/use-status-rings";
-import { cn } from "@/lib/utils";
 import {
   Archive,
   ArrowLeft,
@@ -750,25 +749,13 @@ export function ChatThread({
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Search this conversation"
-          className="text-muted-foreground"
-          onClick={() => {
-            setSearchOpen((open) => !open);
-            setSearchTerm("");
-          }}
-        >
-          <Search className="size-5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
           aria-label="Start voice call"
           title={
             isGroup
               ? "Group calling needs the SFU phase"
               : "Start a WebRTC voice call"
           }
-          className="hidden text-muted-foreground sm:inline-flex"
+          className="text-muted-foreground"
           disabled={isGroup}
           onClick={() =>
             void startCall({
@@ -789,7 +776,7 @@ export function ChatThread({
               ? "Group calling needs the SFU phase"
               : "Start a WebRTC video call"
           }
-          className="hidden text-muted-foreground sm:inline-flex"
+          className="text-muted-foreground"
           disabled={isGroup}
           onClick={() =>
             void startCall({
@@ -814,6 +801,15 @@ export function ChatThread({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem
+              onSelect={() => {
+                setSearchOpen(true);
+                setSearchTerm("");
+              }}
+            >
+              <Search className="size-4" /> Search messages
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() =>
                 void setMemberFlag({ muted: !conversation.muted })

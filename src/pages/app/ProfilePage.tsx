@@ -7,6 +7,7 @@ import { useStatusRings } from "@/hooks/use-status-rings";
 import { usePresence } from "@/providers/PresenceProvider";
 import { useCall } from "@/providers/CallProvider";
 import { startDirectConversation } from "@/lib/chat";
+import { resolvePrivatePhoto } from "@/lib/avatar";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -16,9 +17,11 @@ import {
   MessageSquare,
   Phone,
   Settings,
+  Share2,
   ShieldOff,
   UserPlus,
   Video,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -38,6 +41,8 @@ export default function ProfilePage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
   const isSelf = Boolean(me && userId === me.id);
 
@@ -75,6 +80,24 @@ export default function ProfilePage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    let active = true;
+    setPhotoUrl(null);
+    if (!person) return;
+    if (person.avatar_path) {
+      void resolvePrivatePhoto("profile-photos", person.avatar_path).then(
+        (url) => {
+          if (active) setPhotoUrl(url);
+        },
+      );
+    } else if (person.public_avatar_url) {
+      setPhotoUrl(person.public_avatar_url);
+    }
+    return () => {
+      active = false;
+    };
+  }, [person]);
+
   async function openChat() {
     if (!person || busy) return;
     setBusy("chat");
@@ -108,6 +131,23 @@ export default function ProfilePage() {
       .insert({ owner_id: me.id, contact_id: person.id });
     if (error) setNotice(error.message);
     else setIsContact(true);
+  }
+
+  async function shareContact() {
+    if (!person) return;
+    const name = person.display_name || person.username || "PINGO user";
+    const text = `${name} on PINGO · @${person.username}`;
+    const url = `${window.location.origin}/app/profile/${person.id}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "PINGO contact", text, url });
+        return;
+      }
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      setNotice("Contact link copied to the clipboard.");
+    } catch {
+      // The share sheet was dismissed; nothing to report.
+    }
   }
 
   async function toggleBlock() {
@@ -189,13 +229,20 @@ export default function ProfilePage() {
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6">
         <div className="flex flex-col items-center text-center">
-          <UserAvatar
-            profile={person}
-            size="xl"
-            className="size-28"
-            showPresence
-            ring={statusRing}
-          />
+          <button
+            type="button"
+            onClick={() => setPhotoOpen(true)}
+            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            aria-label="Open profile photo"
+          >
+            <UserAvatar
+              profile={person}
+              size="xl"
+              className="size-28"
+              showPresence
+              ring={statusRing}
+            />
+          </button>
           <h2 className="mt-4 flex items-center justify-center gap-1.5 text-[1.35rem] font-semibold tracking-[-0.02em]">
             {person.display_name || person.username}
             <VerifiedBadge verified={person.is_verified} />
@@ -313,6 +360,13 @@ export default function ProfilePage() {
               </button>
               <button
                 type="button"
+                onClick={() => void shareContact()}
+                className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left text-sm hover:bg-secondary/60"
+              >
+                <Share2 className="size-4 text-muted-foreground" /> Share contact
+              </button>
+              <button
+                type="button"
                 onClick={() => setReportOpen((open) => !open)}
                 className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left text-sm hover:bg-secondary/60"
               >
@@ -358,6 +412,44 @@ export default function ProfilePage() {
           </>
         )}
       </div>
+
+      {photoOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/90">
+          <div className="flex justify-end p-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 text-white hover:bg-white/10"
+              aria-label="Close photo"
+              onClick={() => setPhotoOpen(false)}
+            >
+              <X className="size-5" />
+            </Button>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+            {photoUrl ? (
+              <img
+                src={photoUrl}
+                alt={`${person.display_name || person.username} profile photo`}
+                className="max-h-full max-w-full rounded-lg object-contain"
+              />
+            ) : (
+              <UserAvatar profile={person} size="xl" className="size-56" />
+            )}
+          </div>
+          {isSelf && (
+            <div className="p-4 pb-8">
+              <Button
+                className="w-full"
+                variant="secondary"
+                onClick={() => navigate("/app/settings/profile")}
+              >
+                Change profile photo
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -36,8 +36,16 @@ const VISIBILITY_LABELS: Record<Visibility, string> = {
   everyone: "Everyone",
   contacts: "My contacts",
   contacts_except: "My contacts except…",
+  only: "Only share with…",
   nobody: "Nobody",
 };
+
+const DEFAULT_VISIBILITY_OPTIONS: Visibility[] = [
+  "everyone",
+  "contacts",
+  "contacts_except",
+  "nobody",
+];
 
 const THEMES = [
   { value: "light", label: "Light" },
@@ -56,18 +64,20 @@ function VisibilityPicker({
   onChange,
   label,
   description,
+  options = DEFAULT_VISIBILITY_OPTIONS,
 }: {
   value: Visibility;
   onChange: (value: Visibility) => void;
   label: string;
   description: string;
+  options?: Visibility[];
 }) {
   return (
     <div className="rounded-xl border border-border p-4">
       <p className="text-sm font-bold">{label}</p>
       <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {(Object.keys(VISIBILITY_LABELS) as Visibility[]).map((option) => (
+        {options.map((option) => (
           <button
             key={option}
             type="button"
@@ -493,8 +503,9 @@ export default function SettingsPage() {
                 />
                 <VisibilityPicker
                   label="Status updates"
-                  description="Who can watch your 24-hour updates."
+                  description="Who can watch your 24-hour updates. Manage the exact people from the status editor."
                   value={localSettings.status_visibility}
+                  options={["contacts", "contacts_except", "only", "everyone", "nobody"]}
                   onChange={(value) => void saveSettings({ status_visibility: value })}
                 />
                 <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4">

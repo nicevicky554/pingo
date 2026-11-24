@@ -120,7 +120,11 @@ setup, and [`env.example`](./env.example) for the full list.
 ### Updates, communities, channels
 
 - 24-hour text/photo/video statuses with upload, viewer tracking, reply-to-status,
-  deletion, unseen/viewed rings and a full-screen sequential viewer.
+  deletion, unseen/viewed rings and a full-screen sequential viewer. The viewer
+  supports per-item progress, tap zones, swipe-to-close, quick reactions and an
+  owner-only viewer list. Status audience supports contacts, contacts-except and
+  an explicit only-share-with list (`0015`/`0016`), and expired status media can
+  no longer be signed.
 - Public channel discovery, follow/unfollow, channel creation, real posts and an
   owner/admin composer.
 - Community creation, join/leave, and attaching groups you administer.

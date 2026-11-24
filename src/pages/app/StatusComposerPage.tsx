@@ -1,16 +1,41 @@
-import { PageHeader } from "@/components/app/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
+import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Image as ImageIcon, Loader2, RotateCw, Type, Video, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Image as ImageIcon,
+  Loader2,
+  RotateCw,
+  Type,
+  Video,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
-const BACKGROUNDS = ["#147D80", "#1F2937", "#7C3AED", "#B45309", "#BE123C", "#0F766E"];
+const BACKGROUNDS = [
+  "#147D80",
+  "#174C46",
+  "#1D3A4A",
+  "#2B2F36",
+  "#5A3F2E",
+  "#3C4A2F",
+];
 
 type Kind = "text" | "image" | "video";
+type AudienceMode = "contacts" | "contacts_except" | "only" | "everyone" | "nobody";
+
+const AUDIENCE_LABELS: Record<AudienceMode, string> = {
+  contacts: "My contacts",
+  contacts_except: "My contacts except…",
+  only: "Only share with…",
+  everyone: "Everyone",
+  nobody: "Only me",
+};
 
 export default function StatusComposerPage() {
   const { profile } = useAuth();
@@ -22,24 +47,71 @@ export default function StatusComposerPage() {
   const [media, setMedia] = useState<
     { file: File; url: string; kind: "image" | "video"; rotation: number }[]
   >([]);
-  const [audience, setAudience] = useState<"contacts" | "everyone" | "nobody">("contacts");
+  const [audience, setAudience] = useState<AudienceMode>("contacts");
+  const [audienceOpen, setAudienceOpen] = useState(false);
+  const [contacts, setContacts] = useState<Profile[]>([]);
+  const [exceptIds, setExceptIds] = useState<Set<string>>(new Set());
+  const [onlyIds, setOnlyIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!profile) return;
-    supabase
-      .from("user_settings")
-      .select("status_visibility")
-      .eq("user_id", profile.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        const value = (data as { status_visibility?: string } | null)?.status_visibility;
-        if (value === "everyone" || value === "contacts" || value === "nobody") {
-          setAudience(value);
-        }
-      });
+    let active = true;
+    void (async () => {
+      const [{ data: settings }, { data: rules }, { data: saved }] =
+        await Promise.all([
+          supabase
+            .from("user_settings")
+            .select("status_visibility")
+            .eq("user_id", profile.id)
+            .maybeSingle(),
+          supabase
+            .from("status_audience")
+            .select("viewer_id,rule")
+            .eq("user_id", profile.id),
+          supabase
+            .from("contacts")
+            .select("contact_id")
+            .eq("owner_id", profile.id),
+        ]);
+      if (!active) return;
+
+      const value = (settings as { status_visibility?: string } | null)
+        ?.status_visibility;
+      if (
+        value === "everyone" ||
+        value === "contacts" ||
+        value === "nobody" ||
+        value === "contacts_except" ||
+        value === "only"
+      ) {
+        setAudience(value);
+      }
+
+      const rows = (rules ?? []) as { viewer_id: string; rule: string }[];
+      setExceptIds(
+        new Set(rows.filter((row) => row.rule === "except").map((row) => row.viewer_id)),
+      );
+      setOnlyIds(
+        new Set(rows.filter((row) => row.rule === "only").map((row) => row.viewer_id)),
+      );
+
+      const ids = (saved ?? []).map(
+        (row: { contact_id: string }) => row.contact_id,
+      );
+      if (ids.length > 0) {
+        const { data: people } = await supabase
+          .from("public_profiles")
+          .select("*")
+          .in("id", ids);
+        if (active) setContacts((people ?? []) as Profile[]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [profile]);
 
   function pick(event: React.ChangeEvent<HTMLInputElement>) {
@@ -70,12 +142,25 @@ export default function StatusComposerPage() {
   }
 
   const mediaRef = useRef(media);
-  mediaRef.current = media;
+  useEffect(() => {
+    mediaRef.current = media;
+  }, [media]);
   useEffect(() => {
     return () => {
       for (const item of mediaRef.current) URL.revokeObjectURL(item.url);
     };
   }, []);
+
+  function toggle(
+    id: string,
+    set: Set<string>,
+    update: (next: Set<string>) => void,
+  ) {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    update(next);
+  }
 
   async function publish() {
     if (!profile || busy) return;
@@ -87,15 +172,47 @@ export default function StatusComposerPage() {
       setError("Choose at least one photo or video to share.");
       return;
     }
+    if (audience === "only" && onlyIds.size === 0) {
+      setError("Choose at least one person to share this status with.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await supabase
+      const { error: settingsError } = await supabase
         .from("user_settings")
         .update({ status_visibility: audience })
         .eq("user_id", profile.id);
+      if (settingsError) throw settingsError;
 
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      // Replace both audience rule sets so switching modes cannot leave stale
+      // grants behind.
+      const { error: clearError } = await supabase
+        .from("status_audience")
+        .delete()
+        .eq("user_id", profile.id);
+      if (clearError) throw clearError;
+
+      if (audience === "only" || audience === "contacts_except") {
+        const selected = audience === "only" ? onlyIds : exceptIds;
+        const rule = audience === "only" ? "only" : "except";
+        if (selected.size > 0) {
+          const { error: ruleError } = await supabase
+            .from("status_audience")
+            .insert(
+              Array.from(selected).map((viewer_id) => ({
+                user_id: profile.id,
+                viewer_id,
+                rule,
+              })),
+            );
+          if (ruleError) throw ruleError;
+        }
+      }
+
+      const expiresAt = new Date(
+        Date.now() + 24 * 60 * 60 * 1000,
+      ).toISOString();
       const items =
         kind === "text"
           ? [{ kind: "text" as const, item: null }]
@@ -115,31 +232,41 @@ export default function StatusComposerPage() {
           if (uploadError) throw uploadError;
         }
 
-        const { error: insertError } = await supabase.from("status_updates").insert({
-          user_id: profile.id,
-          kind: entry.kind,
-          body: entry.kind === "text" ? body.trim() : null,
-          media_path: mediaPath,
-          background: entry.kind === "text" ? background : null,
-          rotation: entry.item?.rotation ?? 0,
-          caption:
-            entry.kind === "text"
-              ? null
-              : [caption.trim(), index > 0 ? `Part ${index + 1}` : ""]
-                  .filter(Boolean)
-                  .join(" · ") || null,
-          expires_at: expiresAt,
-        });
+        const { error: insertError } = await supabase
+          .from("status_updates")
+          .insert({
+            user_id: profile.id,
+            kind: entry.kind,
+            body: entry.kind === "text" ? body.trim() : null,
+            media_path: mediaPath,
+            background: entry.kind === "text" ? background : null,
+            rotation: entry.item?.rotation ?? 0,
+            caption:
+              entry.kind === "text"
+                ? null
+                : [caption.trim(), index > 0 ? `Part ${index + 1}` : ""]
+                    .filter(Boolean)
+                    .join(" · ") || null,
+            expires_at: expiresAt,
+          });
         if (insertError) throw insertError;
       }
       for (const item of media) URL.revokeObjectURL(item.url);
       navigate("/app/updates", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The status could not be shared.");
+      setError(
+        err instanceof Error ? err.message : "The status could not be shared.",
+      );
     } finally {
       setBusy(false);
     }
   }
+
+  const audiencePeople =
+    audience === "only"
+      ? contacts.filter((person) => onlyIds.has(person.id))
+      : contacts.filter((person) => exceptIds.has(person.id));
+  const audienceCount = audiencePeople.length;
 
   return (
     <div className="page-enter flex min-h-0 flex-1 flex-col bg-[#0d151c] text-white">
@@ -152,7 +279,12 @@ export default function StatusComposerPage() {
           Cancel
         </button>
         <h1 className="flex-1 text-center text-sm font-semibold">New status</h1>
-        <Button size="sm" className="gap-1.5" onClick={() => void publish()} disabled={busy}>
+        <Button
+          size="sm"
+          className="gap-1.5"
+          onClick={() => void publish()}
+          disabled={busy}
+        >
           {busy && <Loader2 className="size-3.5 animate-spin" />}
           Share status
         </Button>
@@ -195,14 +327,22 @@ export default function StatusComposerPage() {
               className="flex size-full min-h-[320px] items-center justify-center rounded-xl p-8"
               style={{ background }}
             >
-              <p className="max-h-[300px] overflow-y-auto text-center text-xl leading-8 font-medium whitespace-pre-wrap break-words">
+              <p className="max-h-[300px] overflow-y-auto text-center text-xl leading-8 font-medium break-words whitespace-pre-wrap">
                 {body || "Type your status…"}
               </p>
             </div>
           ) : media.length > 0 ? (
-            <div className={cn("grid w-full gap-2", media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
+            <div
+              className={cn(
+                "grid w-full gap-2",
+                media.length === 1 ? "grid-cols-1" : "grid-cols-2",
+              )}
+            >
               {media.map((item) => (
-                <div key={item.url} className="relative overflow-hidden rounded-xl bg-black">
+                <div
+                  key={item.url}
+                  className="relative overflow-hidden rounded-xl bg-black"
+                >
                   {item.kind === "video" ? (
                     <video
                       src={item.url}
@@ -224,10 +364,7 @@ export default function StatusComposerPage() {
                       setMedia((current) =>
                         current.map((entry) =>
                           entry.url === item.url
-                            ? {
-                                ...entry,
-                                rotation: (entry.rotation + 90) % 360,
-                              }
+                            ? { ...entry, rotation: (entry.rotation + 90) % 360 }
                             : entry,
                         ),
                       )
@@ -254,8 +391,14 @@ export default function StatusComposerPage() {
               onClick={() => input.current?.click()}
               className="flex size-full min-h-[320px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/25 text-white/60"
             >
-              {kind === "video" ? <Video className="size-7" /> : <ImageIcon className="size-7" />}
-              <span className="text-sm">Choose {kind === "video" ? "a video" : "a photo"}</span>
+              {kind === "video" ? (
+                <Video className="size-7" />
+              ) : (
+                <ImageIcon className="size-7" />
+              )}
+              <span className="text-sm">
+                Choose {kind === "video" ? "a video" : "a photo"}
+              </span>
             </button>
           )}
         </div>
@@ -307,27 +450,106 @@ export default function StatusComposerPage() {
             />
           )}
 
-          <label className="flex items-center justify-between rounded-md bg-white/10 px-3 py-2 text-xs">
-            <span className="text-white/70">Who can see this</span>
-            <select
-              value={audience}
-              onChange={(event) =>
-                setAudience(event.target.value as "contacts" | "everyone" | "nobody")
-              }
-              className="bg-transparent text-white outline-none"
+          <div className="rounded-lg bg-white/10">
+            <button
+              type="button"
+              onClick={() => setAudienceOpen((open) => !open)}
+              className="flex w-full items-center justify-between px-3 py-2.5 text-xs"
             >
-              <option className="text-black" value="contacts">
-                My contacts
-              </option>
-              <option className="text-black" value="everyone">
-                Everyone
-              </option>
-              <option className="text-black" value="nobody">
-                Only me
-              </option>
-            </select>
-          </label>
-          <p className="text-[0.65rem] text-white/40">Statuses expire after 24 hours.</p>
+              <span className="text-white/60">Who can see this</span>
+              <span className="flex items-center gap-1.5 font-medium text-white">
+                {AUDIENCE_LABELS[audience]}
+                {audienceCount > 0 && (
+                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[0.6rem]">
+                    {audienceCount}
+                  </span>
+                )}
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    audienceOpen && "rotate-180",
+                  )}
+                />
+              </span>
+            </button>
+
+            {audienceOpen && (
+              <div className="border-t border-white/10 px-2 py-2">
+                {(Object.keys(AUDIENCE_LABELS) as AudienceMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setAudience(mode);
+                      if (mode !== "only" && mode !== "contacts_except") {
+                        setAudienceOpen(false);
+                      }
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-white/80 hover:bg-white/10"
+                  >
+                    <span className="flex size-4 items-center justify-center">
+                      {audience === mode && <Check className="size-3.5 text-primary" />}
+                    </span>
+                    {AUDIENCE_LABELS[mode]}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {(audience === "only" || audience === "contacts_except") && (
+              <div className="border-t border-white/10 px-3 py-3">
+                <p className="text-[0.65rem] text-white/50">
+                  {audience === "only"
+                    ? "Only the people you select can see this status."
+                    : "Everyone in your contacts except the people you select."}
+                </p>
+                {contacts.length === 0 ? (
+                  <p className="mt-2 rounded-md bg-white/5 px-3 py-2 text-[0.68rem] leading-5 text-white/50">
+                    You have no saved contacts yet. Open a profile and choose
+                    “Add to contacts” first.
+                  </p>
+                ) : (
+                  <ul className="mt-2 max-h-44 space-y-0.5 overflow-y-auto">
+                    {contacts.map((person) => {
+                      const set = audience === "only" ? onlyIds : exceptIds;
+                      const update =
+                        audience === "only" ? setOnlyIds : setExceptIds;
+                      const checked = set.has(person.id);
+                      return (
+                        <li key={person.id}>
+                          <button
+                            type="button"
+                            onClick={() => toggle(person.id, set, update)}
+                            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-xs hover:bg-white/10"
+                          >
+                            <span
+                              className={cn(
+                                "flex size-4 items-center justify-center rounded border",
+                                checked
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-white/30",
+                              )}
+                            >
+                              {checked && <Check className="size-3" />}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">
+                              {person.display_name || person.username}
+                            </span>
+                            <span className="shrink-0 text-[0.62rem] text-white/40">
+                              @{person.username}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+          <p className="text-[0.65rem] text-white/40">
+            Statuses expire after 24 hours.
+          </p>
         </div>
 
         {error && (

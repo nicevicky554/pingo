@@ -641,8 +641,18 @@ export function Composer({
                 URL.revokeObjectURL(pendingVoice.url);
                 setPendingVoice(null);
               } catch (err) {
+                const raw = err instanceof Error ? err.message : "";
+                // The optimistic chat bubble holds the recording and exposes a
+                // single Retry action, so clearing the duplicate preview cannot
+                // lose it or allow a double send.
+                URL.revokeObjectURL(pendingVoice.url);
+                setPendingVoice(null);
+                setVoicePlaying(false);
+                setVoiceProgress(0);
                 setError(
-                  err instanceof Error ? err.message : "Voice note failed to send.",
+                  /row-level security|unauthori[sz]ed|new row|row-level/i.test(raw)
+                    ? "The voice note could not be sent. Tap Retry on the message in the chat — the recording is kept there."
+                    : raw || "Voice note failed to send. Tap Retry on the message.",
                 );
               } finally {
                 setSending(false);

@@ -2,6 +2,7 @@ export type Visibility =
   | "everyone"
   | "contacts"
   | "contacts_except"
+  | "only"
   | "nobody";
 
 export type MemberRole = "owner" | "admin" | "member";

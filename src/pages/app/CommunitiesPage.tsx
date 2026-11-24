@@ -10,13 +10,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
-import { listConversations, listMembers } from "@/lib/chat";
+import { listConversations } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
 import type { Community, ConversationSummary } from "@/lib/types";
 import {
   Check,
   Loader2,
   Plus,
+  Radio,
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -94,6 +95,15 @@ export default function CommunitiesPage() {
             Groups that belong together
           </p>
         </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-9 text-muted-foreground"
+          aria-label="Discover channels"
+          onClick={() => navigate("/app/channels")}
+        >
+          <Radio className="size-[19px]" />
+        </Button>
         <Button
           size="sm"
           className="gap-1.5"

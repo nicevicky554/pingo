@@ -142,6 +142,16 @@ export async function sendMessage(input: {
   // server independently verifies the token, membership and posting rights;
   // it never trusts senderId from this payload.
   if (error && (error.code === "42501" || /row-level security/i.test(error.message))) {
+    // Diagnostics without message bodies or tokens.
+    console.error("[PINGO] message insert rejected", {
+      table: "public.messages",
+      operation: "insert",
+      code: error.code,
+      conversationId: input.conversationId,
+      senderId: input.senderId,
+      kind: input.kind ?? "text",
+      hasAttachment: Boolean(input.attachmentPath),
+    });
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
@@ -166,9 +176,18 @@ export async function sendMessage(input: {
       }
     } catch (fallbackError) {
       if (fallbackError instanceof Error && fallbackError.message) {
-        throw new Error(`${error.message} · ${fallbackError.message}`);
+        throw new Error(
+          `PINGO could not confirm this message was saved. ${fallbackError.message}`,
+        );
       }
     }
+
+    // The browser policy rejected it and no verified server route could accept
+    // it. Keep the optimistic bubble (so the draft is not lost) and explain it
+    // in product language; the exact PostgREST code is in the console above.
+    throw new Error(
+      "PINGO could not save this message. Keep it here and tap Retry in a moment.",
+    );
   }
 
   if (error) throw error;

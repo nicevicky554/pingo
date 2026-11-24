@@ -32,6 +32,8 @@ Convex dependency.
    - `supabase/migrations/0012_one_reaction_per_user.sql`
    - `supabase/migrations/0013_status_media_rotation.sql`
    - `supabase/migrations/0014_whatsapp_otp.sql`
+   - `supabase/migrations/0015_status_audience_only.sql`
+   - `supabase/migrations/0016_status_audience_rules.sql`
 
     Migration 0007 enables RLS and recreates all public, Storage and Realtime
     policies. Normal browser requests use the publishable key and the user's
