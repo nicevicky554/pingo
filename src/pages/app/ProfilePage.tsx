@@ -15,7 +15,9 @@ import {
   Flag,
   Loader2,
   MessageSquare,
+  Pencil,
   Phone,
+  Search,
   Settings,
   Share2,
   ShieldOff,
@@ -104,6 +106,19 @@ export default function ProfilePage() {
     try {
       const conversationId = await startDirectConversation(person.id);
       navigate(`/app/chats?c=${conversationId}`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not open the chat.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function searchMessages() {
+    if (!person || busy) return;
+    setBusy("search");
+    try {
+      const conversationId = await startDirectConversation(person.id);
+      navigate(`/app/chats?c=${conversationId}&search=1`);
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Could not open the chat.");
     } finally {
@@ -255,11 +270,6 @@ export default function ProfilePage() {
               "Offline"
             )}
           </p>
-          {isSelf && (
-            <p className="mt-2 text-sm font-medium tabular-nums">
-              {session?.user.phone ?? me?.phone ?? "No verified phone on this session"}
-            </p>
-          )}
           {person.about && (
             <p className="mt-4 max-w-md text-sm leading-6 text-foreground/90">
               {person.about}
@@ -290,18 +300,51 @@ export default function ProfilePage() {
         )}
 
         {isSelf ? (
-          <div className="mt-6 grid grid-cols-2 gap-2">
-            <Button className="gap-2" onClick={() => navigate("/app/settings")}>
-              <Settings className="size-4" /> Edit profile
-            </Button>
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={() => navigate("/app/updates")}
-            >
-              <MessageSquare className="size-4" /> Your updates
-            </Button>
-          </div>
+          <ul className="mt-6 overflow-hidden rounded-lg border border-border bg-card">
+            {[
+              { label: "Name", value: person.display_name || "Add your name" },
+              { label: "Username", value: `@${person.username}` },
+              { label: "About", value: person.about || "Add a short about" },
+            ].map((row) => (
+              <li key={row.label} className="border-b border-border">
+                <button
+                  type="button"
+                  onClick={() => navigate("/app/settings/profile")}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-secondary/60"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[0.7rem] text-muted-foreground">
+                      {row.label}
+                    </span>
+                    <span className="block truncate text-sm">{row.value}</span>
+                  </span>
+                  <Pencil className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              </li>
+            ))}
+            <li>
+              <div className="flex items-center gap-3 px-4 py-3">
+                <Phone className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[0.7rem] text-muted-foreground">
+                    Verified phone
+                  </span>
+                  <span className="block text-sm tabular-nums">
+                    {session?.user.phone
+                      ? `+${session.user.phone.replace(/^\+/, "")}`
+                      : "No verified phone on this session"}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigate("/app/settings/account")}
+                  className="text-xs font-medium text-primary"
+                >
+                  Change number
+                </button>
+              </div>
+            </li>
+          </ul>
         ) : (
           <>
             <div className="mt-6 grid grid-cols-3 gap-2">
@@ -357,6 +400,14 @@ export default function ProfilePage() {
               >
                 <UserPlus className="size-4 text-primary" />
                 {isContact ? "Saved in your contacts" : "Add to contacts"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void searchMessages()}
+                disabled={Boolean(busy)}
+                className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left text-sm hover:bg-secondary/60"
+              >
+                <Search className="size-4 text-muted-foreground" /> Search messages
               </button>
               <button
                 type="button"

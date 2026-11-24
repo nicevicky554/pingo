@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import { sendMessage, startDirectConversation } from "@/lib/chat";
+import { STATUS_FONTS } from "@/lib/status";
 import { supabase } from "@/lib/supabase";
 import { watchChannel } from "@/lib/realtime";
 import type { Profile, StatusUpdate } from "@/lib/types";
@@ -17,6 +18,8 @@ import {
   MessageCircle,
   Plus,
   Radio,
+  BellOff,
+  Bell,
   Trash2,
   X,
 } from "lucide-react";
@@ -89,7 +92,14 @@ function StatusVisual({
         className="flex size-full items-center justify-center px-8 py-16 text-center"
         style={{ backgroundColor: status.background ?? "#0F5F63" }}
       >
-        <p className="max-w-lg text-[1.6rem] leading-snug font-semibold text-white whitespace-pre-wrap">
+        <p
+          className="w-full max-w-lg text-[1.6rem] leading-snug font-semibold whitespace-pre-wrap"
+          style={{
+            fontFamily: STATUS_FONTS[status.font ?? "sans"],
+            textAlign: status.text_align ?? "center",
+            color: status.text_color ?? "#FFFFFF",
+          }}
+        >
           {status.body}
         </p>
       </div>
@@ -136,6 +146,7 @@ export default function UpdatesPage() {
   const [statuses, setStatuses] = useState<StatusUpdate[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [viewed, setViewed] = useState<Set<string>>(new Set());
+  const [muted, setMuted] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -170,8 +181,44 @@ export default function UpdatesPage() {
       .select("status_id")
       .eq("viewer_id", profileId);
     setViewed(new Set((views ?? []).map((row) => row.status_id)));
+
+    // status_mutes comes from migration 0018; ignore the error until applied.
+    const { data: muteRows, error: muteError } = await supabase
+      .from("status_mutes")
+      .select("muted_user_id")
+      .eq("user_id", profileId);
+    if (!muteError) {
+      setMuted(new Set((muteRows ?? []).map((row) => row.muted_user_id)));
+    }
     setLoading(false);
   }, [profileId]);
+
+  async function toggleMute(userId: string) {
+    if (!profileId) return;
+    const isMuted = muted.has(userId);
+    setMuted((current) => {
+      const next = new Set(current);
+      if (isMuted) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+    const result = isMuted
+      ? await supabase
+          .from("status_mutes")
+          .delete()
+          .match({ user_id: profileId, muted_user_id: userId })
+      : await supabase
+          .from("status_mutes")
+          .insert({ user_id: profileId, muted_user_id: userId });
+    if (result.error) {
+      setMuted((current) => {
+        const next = new Set(current);
+        if (isMuted) next.add(userId);
+        else next.delete(userId);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -219,6 +266,54 @@ export default function UpdatesPage() {
         return bTime.localeCompare(aTime);
       });
   }, [statuses, profile?.id, profiles, viewed]);
+
+  const recentGroups = groups.filter((group) => !muted.has(group.profile.id));
+  const mutedGroups = groups.filter((group) => muted.has(group.profile.id));
+
+  function openGroup(group: StatusGroup) {
+    setViewerGroup(group);
+    setViewerIndex(0);
+    void recordView(group.statuses[0]);
+  }
+
+  function renderGroup(group: StatusGroup, dimmed = false) {
+    const latest = group.statuses[group.statuses.length - 1];
+    return (
+      <li key={group.profile.id}>
+        <button
+          type="button"
+          onClick={() => openGroup(group)}
+          className={cn(
+            "flex w-full items-center gap-3.5 px-4 py-2.5 text-left transition-colors hover:bg-secondary/60",
+            dimmed && "opacity-60",
+          )}
+        >
+          <UserAvatar
+            profile={group.profile}
+            size="md"
+            ring={group.allSeen || dimmed ? "viewed" : "unseen"}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[0.9rem] font-medium">
+              {group.profile.display_name || group.profile.username}
+            </span>
+            <span className="mt-0.5 block text-[0.72rem] text-muted-foreground">
+              {new Date(latest.created_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              {group.statuses.length > 1
+                ? ` · ${group.statuses.length} updates`
+                : " · 1 update"}
+            </span>
+          </span>
+          {!group.allSeen && !dimmed && (
+            <span className="size-2 shrink-0 rounded-full bg-primary" />
+          )}
+        </button>
+      </li>
+    );
+  }
 
   useEffect(() => {
     const requested = searchParams.get("statusUser");
@@ -347,9 +442,9 @@ export default function UpdatesPage() {
             <h2 className="text-[0.65rem] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
               Recent updates
             </h2>
-            {groups.some((group) => !group.allSeen) && (
+            {recentGroups.some((group) => !group.allSeen) && (
               <span className="text-[0.62rem] font-medium text-primary">
-                {groups.filter((group) => !group.allSeen).length} new
+                {recentGroups.filter((group) => !group.allSeen).length} new
               </span>
             )}
           </div>
@@ -358,7 +453,7 @@ export default function UpdatesPage() {
             <div className="flex justify-center py-10">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
-          ) : groups.length === 0 ? (
+          ) : recentGroups.length === 0 ? (
             <div className="px-6 py-10 text-center">
               <p className="text-sm font-medium">No recent updates</p>
               <p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-muted-foreground">
@@ -376,49 +471,21 @@ export default function UpdatesPage() {
             </div>
           ) : (
             <ul className="divide-y divide-border/70">
-              {groups.map((group) => {
-                const latest = group.statuses[group.statuses.length - 1];
-                return (
-                  <li key={group.profile.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setViewerGroup(group);
-                        setViewerIndex(0);
-                        void recordView(group.statuses[0]);
-                      }}
-                      className="flex w-full items-center gap-3.5 px-4 py-2.5 text-left transition-colors hover:bg-secondary/60"
-                    >
-                      <UserAvatar
-                        profile={group.profile}
-                        size="md"
-                        ring={group.allSeen ? "viewed" : "unseen"}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[0.9rem] font-medium">
-                          {group.profile.display_name ||
-                            group.profile.username}
-                        </span>
-                        <span className="mt-0.5 block text-[0.72rem] text-muted-foreground">
-                          {new Date(latest.created_at).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {group.statuses.length > 1
-                            ? ` · ${group.statuses.length} updates`
-                            : " · 1 update"}
-                        </span>
-                      </span>
-                      {!group.allSeen && (
-                        <span className="size-2 shrink-0 rounded-full bg-primary" />
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
+              {recentGroups.map((group) => renderGroup(group))}
             </ul>
           )}
         </div>
+
+        {mutedGroups.length > 0 && (
+          <div className="mt-1 border-y border-border bg-card">
+            <h2 className="px-4 pt-3 pb-1 text-[0.65rem] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+              Muted updates
+            </h2>
+            <ul className="divide-y divide-border/70">
+              {mutedGroups.map((group) => renderGroup(group, true))}
+            </ul>
+          </div>
+        )}
 
         <Link
           to="/app/channels"
@@ -454,6 +521,8 @@ export default function UpdatesPage() {
             navigate(`/app/profile/${userId}`);
           }}
           isMine={viewerGroup.profile.id === profile.id}
+          isMuted={muted.has(viewerGroup.profile.id)}
+          onToggleMute={() => void toggleMute(viewerGroup.profile.id)}
           onDelete={() => void deleteStatus(viewerGroup.statuses[viewerIndex])}
           onReply={async (message) => {
             const conversationId = await startDirectConversation(
@@ -482,6 +551,8 @@ function StatusViewer({
   onClose,
   onOpenProfile,
   isMine,
+  isMuted,
+  onToggleMute,
   onDelete,
   onReply,
 }: {
@@ -492,6 +563,8 @@ function StatusViewer({
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
   isMine: boolean;
+  isMuted: boolean;
+  onToggleMute: () => void;
   onDelete: () => void;
   onReply: (message: string) => Promise<void>;
 }) {
@@ -657,6 +730,17 @@ function StatusViewer({
               <Trash2 className="size-4" />
             </Button>
           </>
+        )}
+        {!isMine && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleMute}
+            aria-label={isMuted ? "Unmute status updates" : "Mute status updates"}
+            className="size-8 text-white hover:bg-white/10"
+          >
+            {isMuted ? <Bell className="size-4" /> : <BellOff className="size-4" />}
+          </Button>
         )}
         <Button
           variant="ghost"

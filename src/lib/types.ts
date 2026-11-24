@@ -114,6 +114,9 @@ export type StatusUpdate = {
   background: string | null;
   caption: string | null;
   rotation?: number;
+  font?: "sans" | "serif" | "mono" | "rounded" | null;
+  text_align?: "left" | "center" | "right" | null;
+  text_color?: string | null;
   created_at: string;
   expires_at: string;
   profile?: Profile | null;

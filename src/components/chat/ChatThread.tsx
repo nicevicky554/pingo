@@ -90,7 +90,9 @@ export function ChatThread({
   const [activities, setActivities] = useState<
     Record<string, { label: string; expiry: number }>
   >({});
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(
+    () => new URLSearchParams(window.location.search).get("search") === "1",
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);

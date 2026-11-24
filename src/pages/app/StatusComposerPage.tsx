@@ -1,10 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
+import { STATUS_FONTS, type StatusFont } from "@/lib/status";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   Check,
   ChevronDown,
   Image as ImageIcon,
@@ -26,6 +30,10 @@ const BACKGROUNDS = [
   "#3C4A2F",
 ];
 
+type StatusAlign = "left" | "center" | "right";
+const TEXT_COLORS = ["#FFFFFF", "#FDE68A", "#A7F3D0", "#BAE6FD", "#FBCFE8"];
+const QUICK_EMOJI = ["😀", "😂", "😍", "🔥", "🙏", "🎉", "❤️", "👍"];
+
 type Kind = "text" | "image" | "video";
 type AudienceMode = "contacts" | "contacts_except" | "only" | "everyone" | "nobody";
 
@@ -44,6 +52,9 @@ export default function StatusComposerPage() {
   const [body, setBody] = useState("");
   const [caption, setCaption] = useState("");
   const [background, setBackground] = useState(BACKGROUNDS[0]);
+  const [font, setFont] = useState<StatusFont>("sans");
+  const [align, setAlign] = useState<StatusAlign>("center");
+  const [textColor, setTextColor] = useState(TEXT_COLORS[0]);
   const [media, setMedia] = useState<
     { file: File; url: string; kind: "image" | "video"; rotation: number }[]
   >([]);
@@ -232,23 +243,35 @@ export default function StatusComposerPage() {
           if (uploadError) throw uploadError;
         }
 
-        const { error: insertError } = await supabase
+        const row = {
+          user_id: profile.id,
+          kind: entry.kind,
+          body: entry.kind === "text" ? body.trim() : null,
+          media_path: mediaPath,
+          background: entry.kind === "text" ? background : null,
+          rotation: entry.item?.rotation ?? 0,
+          caption:
+            entry.kind === "text"
+              ? null
+              : [caption.trim(), index > 0 ? `Part ${index + 1}` : ""]
+                  .filter(Boolean)
+                  .join(" · ") || null,
+          expires_at: expiresAt,
+        };
+        const styled =
+          entry.kind === "text"
+            ? { ...row, font, text_align: align, text_color: textColor }
+            : row;
+        let { error: insertError } = await supabase
           .from("status_updates")
-          .insert({
-            user_id: profile.id,
-            kind: entry.kind,
-            body: entry.kind === "text" ? body.trim() : null,
-            media_path: mediaPath,
-            background: entry.kind === "text" ? background : null,
-            rotation: entry.item?.rotation ?? 0,
-            caption:
-              entry.kind === "text"
-                ? null
-                : [caption.trim(), index > 0 ? `Part ${index + 1}` : ""]
-                    .filter(Boolean)
-                    .join(" · ") || null,
-            expires_at: expiresAt,
-          });
+          .insert(styled);
+        // Migration 0018 adds the text style columns; publish without them
+        // rather than failing when it has not been applied yet.
+        if (insertError && styled !== row && /column/i.test(insertError.message)) {
+          ({ error: insertError } = await supabase
+            .from("status_updates")
+            .insert(row));
+        }
         if (insertError) throw insertError;
       }
       for (const item of media) URL.revokeObjectURL(item.url);
@@ -327,7 +350,14 @@ export default function StatusComposerPage() {
               className="flex size-full min-h-[320px] items-center justify-center rounded-xl p-8"
               style={{ background }}
             >
-              <p className="max-h-[300px] overflow-y-auto text-center text-xl leading-8 font-medium break-words whitespace-pre-wrap">
+              <p
+                className="max-h-[300px] w-full overflow-y-auto text-xl leading-8 font-medium break-words whitespace-pre-wrap"
+                style={{
+                  fontFamily: STATUS_FONTS[font],
+                  textAlign: align,
+                  color: textColor,
+                }}
+              >
                 {body || "Type your status…"}
               </p>
             </div>
@@ -423,6 +453,72 @@ export default function StatusComposerPage() {
                 placeholder="What's on your mind?"
                 className="resize-none border-white/15 bg-white/10 text-white placeholder:text-white/50"
               />
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(Object.keys(STATUS_FONTS) as StatusFont[]).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setFont(key)}
+                    aria-pressed={font === key}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-xs capitalize",
+                      font === key ? "bg-white text-[#0d151c]" : "bg-white/10 text-white/80",
+                    )}
+                    style={{ fontFamily: STATUS_FONTS[key] }}
+                  >
+                    {key}
+                  </button>
+                ))}
+                <span className="mx-1 h-4 w-px bg-white/20" aria-hidden />
+                {(["left", "center", "right"] as const).map((value) => {
+                  const Icon =
+                    value === "left" ? AlignLeft : value === "right" ? AlignRight : AlignCenter;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setAlign(value)}
+                      aria-label={`Align ${value}`}
+                      aria-pressed={align === value}
+                      className={cn(
+                        "flex size-7 items-center justify-center rounded-full",
+                        align === value ? "bg-white text-[#0d151c]" : "bg-white/10",
+                      )}
+                    >
+                      <Icon className="size-3.5" />
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[0.65rem] text-white/50">Text</span>
+                {TEXT_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setTextColor(color)}
+                    aria-label={`Text colour ${color}`}
+                    className={cn(
+                      "size-6 rounded-full border-2",
+                      textColor === color ? "border-white" : "border-white/20",
+                    )}
+                    style={{ background: color }}
+                  />
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                {QUICK_EMOJI.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setBody((current) => (current + emoji).slice(0, 700))}
+                    aria-label={`Insert ${emoji}`}
+                    className="flex size-8 items-center justify-center rounded-full text-lg hover:bg-white/10"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-[0.65rem] text-white/50">Background</span>
                 {BACKGROUNDS.map((color) => (
