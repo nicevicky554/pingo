@@ -64,6 +64,12 @@ export default function ChannelPage() {
       .order("created_at", { ascending: false })
       .limit(50);
     setPosts((postRows ?? []) as Post[]);
+    // Record genuine, deduplicated views for the posts currently shown. The
+    // server function only counts each user once per post.
+    const visibleIds = (postRows ?? []).map((row) => (row as Post).id);
+    if (visibleIds.length > 0) {
+      void supabase.rpc("pingo_record_channel_views", { post_ids: visibleIds });
+    }
 
     const { count } = await supabase
       .from("channel_members")
@@ -272,9 +278,74 @@ export default function ChannelPage() {
   );
 }
 
+const CHANNEL_REACTIONS = ["👍", "❤️", "🔥", "🎉"];
+
 function ChannelPostCard({ post }: { post: Post }) {
+  const { profile } = useAuth();
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [isImage, setIsImage] = useState(false);
+  const [reactions, setReactions] = useState<
+    { emoji: string; count: number; mine: boolean }[]
+  >([]);
+
+  const loadReactions = useCallback(async () => {
+    const { data } = await supabase
+      .from("channel_reactions")
+      .select("emoji,user_id")
+      .eq("post_id", post.id);
+    const rows = (data ?? []) as { emoji: string; user_id: string }[];
+    const grouped = new Map<string, { count: number; mine: boolean }>();
+    rows.forEach((row) => {
+      const current = grouped.get(row.emoji) ?? { count: 0, mine: false };
+      grouped.set(row.emoji, {
+        count: current.count + 1,
+        mine: current.mine || row.user_id === profile?.id,
+      });
+    });
+    setReactions(
+      CHANNEL_REACTIONS.map((emoji) => ({
+        emoji,
+        count: grouped.get(emoji)?.count ?? 0,
+        mine: grouped.get(emoji)?.mine ?? false,
+      })),
+    );
+  }, [post.id, profile?.id]);
+
+  useEffect(() => {
+    void loadReactions();
+  }, [loadReactions]);
+
+  async function react(emoji: string) {
+    if (!profile) return;
+    const alreadyMine = reactions.find((row) => row.emoji === emoji)?.mine;
+    setReactions((current) => {
+      const next = current.map((row) => {
+        if (row.emoji === emoji) {
+          return {
+            ...row,
+            mine: !alreadyMine,
+            count: Math.max(0, row.count + (alreadyMine ? -1 : 1)),
+          };
+        }
+        return row.mine ? { ...row, mine: false, count: Math.max(0, row.count - 1) } : row;
+      });
+      return next;
+    });
+    // One reaction per member per post: replace any existing choice first.
+    await supabase
+      .from("channel_reactions")
+      .delete()
+      .eq("post_id", post.id)
+      .eq("user_id", profile.id);
+    if (!alreadyMine) {
+      await supabase.from("channel_reactions").insert({
+        post_id: post.id,
+        user_id: profile.id,
+        emoji,
+      });
+    }
+    await loadReactions();
+  }
 
   useEffect(() => {
     if (!post.media_path) return;
@@ -328,6 +399,25 @@ function ChannelPostCard({ post }: { post: Post }) {
             Open attachment
           </a>
         ))}
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {reactions.map((row) => (
+          <button
+            key={row.emoji}
+            type="button"
+            onClick={() => void react(row.emoji)}
+            aria-label={`React ${row.emoji}`}
+            className={
+              row.mine
+                ? "rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs"
+                : "rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-secondary"
+            }
+          >
+            {row.emoji}
+            {row.count > 0 ? ` ${row.count}` : ""}
+          </button>
+        ))}
+      </div>
     </article>
   );
 }

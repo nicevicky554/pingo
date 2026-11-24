@@ -14,11 +14,9 @@ import {
   randomInt,
   timingSafeEqual,
 } from "node:crypto";
-import {
-  createClient,
-  type SupabaseClient,
-  type User,
-} from "@supabase/supabase-js";
+import { type SupabaseClient, type User } from "@supabase/supabase-js";
+
+export { serverSupabase } from "./supabase";
 
 export const OTP_TTL_SECONDS = Math.min(
   900,
@@ -70,27 +68,7 @@ export function sameHash(left: string, right: string) {
   return timingSafeEqual(a, b);
 }
 
-export type ServerSupabase = {
-  admin: SupabaseClient;
-  url: string;
-  secret: string;
-};
 
-export function serverSupabase(): ServerSupabase | null {
-  const url = process.env.SUPABASE_URL?.trim();
-  const secret = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!url || !secret) return null;
-  return {
-    url,
-    secret,
-    admin: createClient(url, secret, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    }),
-  };
-}
 
 export type TwilioWhatsAppConfig = {
   accountSid: string;

@@ -4,7 +4,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { durationLabel } from "@/lib/format";
 import { freshPrivateChannel } from "@/lib/realtime";
 import { supabase } from "@/lib/supabase";
-import type { Profile } from "@/lib/types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Loader2,
@@ -12,6 +11,8 @@ import {
   Mic,
   MicOff,
   Minimize2,
+  Monitor,
+  MonitorOff,
   Phone,
   PhoneOff,
   RefreshCw,
@@ -125,6 +126,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [reconnecting, setReconnecting] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [outputDevice, setOutputDevice] = useState("default");
+  const [sharingScreen, setSharingScreen] = useState(false);
+  const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
   const [quality, setQuality] = useState<{
     height: number;
     bitrateKbps: number;
@@ -138,6 +141,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const sessionRef = useRef<CallSession | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
   const startedAtRef = useRef<number | null>(null);
   const recordedCallIds = useRef(new Set<string>());
@@ -269,6 +274,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
       pcRef.current?.getSenders().forEach((sender) => sender.track?.stop());
       pcRef.current?.close();
       pcRef.current = null;
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+      cameraTrackRef.current = null;
+      setSharingScreen(false);
+      setLocalScreen(null);
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       pendingCandidates.current = [];
@@ -957,13 +967,79 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const stopScreenShare = useCallback(async () => {
+    const sender = pcRef.current
+      ?.getSenders()
+      .find((item) => item.track?.kind === "video");
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+
+    let camera = cameraTrackRef.current;
+    if (!camera) {
+      try {
+        const replacement = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facingRef.current },
+        });
+        camera = replacement.getVideoTracks()[0] ?? null;
+        cameraTrackRef.current = camera;
+      } catch {
+        camera = null;
+      }
+    }
+    if (sender && camera) {
+      try {
+        await sender.replaceTrack(camera);
+      } catch (error) {
+        console.warn("[PINGO] camera restore after screen share failed", error);
+      }
+    }
+    setLocalScreen(null);
+    setSharingScreen(false);
+  }, []);
+
+  const startScreenShare = useCallback(async () => {
+    const sender = pcRef.current
+      ?.getSenders()
+      .find((item) => item.track?.kind === "video");
+    if (!sender) {
+      setNotice("Screen sharing is only available during a video call.");
+      return;
+    }
+    if (!("getDisplayMedia" in navigator.mediaDevices)) {
+      setNotice("This browser does not support screen sharing.");
+      return;
+    }
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 15, max: 30 } },
+        audio: false,
+      });
+      const track = display.getVideoTracks()[0];
+      if (!track) return;
+      cameraTrackRef.current =
+        sender.track ?? localStreamRef.current?.getVideoTracks()[0] ?? null;
+      await sender.replaceTrack(track);
+      screenStreamRef.current = display;
+      setLocalScreen(display);
+      setSharingScreen(true);
+      // The browser's own "Stop sharing" control must restore the camera.
+      track.onended = () => {
+        void stopScreenShare();
+      };
+    } catch (error) {
+      if ((error as DOMException)?.name !== "NotAllowedError") {
+        setNotice("Screen sharing could not start.");
+      }
+    }
+  }, [stopScreenShare]);
+
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    if (localVideoRef.current && (localScreen || localStream)) {
+      localVideoRef.current.srcObject = localScreen ?? localStream;
     }
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
@@ -971,7 +1047,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (remoteAudioRef.current && remoteStream && session?.kind === "voice") {
       remoteAudioRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream, localStream, session?.phase, session?.kind, minimized]);
+  }, [
+    remoteStream,
+    localStream,
+    localScreen,
+    session?.phase,
+    session?.kind,
+    minimized,
+  ]);
 
   const value = useMemo<CallContextValue>(
     () => ({ active: Boolean(session), startCall }),
@@ -1081,10 +1164,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   : "measuring"}
               </span>
             )}
-            {session.phase === "active" && (
-              <button
-                type="button"
-                onClick={() => setMinimized(true)}
+                            {sharingScreen && (
+                  <span className="hidden rounded-full bg-primary/20 px-2.5 py-1 text-[0.6rem] font-medium text-white/90 sm:inline">
+                    Sharing screen
+                  </span>
+                )}
+                {session.phase === "active" && (
+                  <button
+                    type="button"
+                    onClick={() => setMinimized(true)}
                 className="flex size-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
                 aria-label="Minimize call"
               >
@@ -1102,7 +1190,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   playsInline
                   className="size-full bg-black object-contain"
                 />
-                {session.phase !== "incoming" && !session.cameraOff && (
+                {session.phase !== "incoming" &&
+                  (sharingScreen || !session.cameraOff) && (
                   <video
                     ref={localVideoRef}
                     autoPlay
@@ -1194,28 +1283,59 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 </Button>
                 {session.kind === "video" && (
                   <>
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      aria-label={session.cameraOff ? "Turn camera on" : "Turn camera off"}
-                      className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
-                      onClick={toggleCamera}
-                    >
-                      {session.cameraOff ? (
-                        <VideoOff className="size-5" />
-                      ) : (
-                        <VideoIcon className="size-5" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      aria-label="Switch camera"
-                      className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
-                      onClick={() => void switchCamera()}
-                    >
-                      <SwitchCamera className="size-5" />
-                    </Button>
+                    {!sharingScreen && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          aria-label={
+                            session.cameraOff ? "Turn camera on" : "Turn camera off"
+                          }
+                          className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
+                          onClick={toggleCamera}
+                        >
+                          {session.cameraOff ? (
+                            <VideoOff className="size-5" />
+                          ) : (
+                            <VideoIcon className="size-5" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          aria-label="Switch camera"
+                          className="size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
+                          onClick={() => void switchCamera()}
+                        >
+                          <SwitchCamera className="size-5" />
+                        </Button>
+                      </>
+                    )}
+                    {"getDisplayMedia" in navigator.mediaDevices && (
+                      <Button
+                        variant="secondary"
+                        size="icon"
+                        aria-label={
+                          sharingScreen ? "Stop sharing screen" : "Share screen"
+                        }
+                        className={
+                          sharingScreen
+                            ? "size-12 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+                            : "size-12 rounded-full bg-white/10 text-white hover:bg-white/20"
+                        }
+                        onClick={() =>
+                          void (sharingScreen
+                            ? stopScreenShare()
+                            : startScreenShare())
+                        }
+                      >
+                        {sharingScreen ? (
+                          <MonitorOff className="size-5" />
+                        ) : (
+                          <Monitor className="size-5" />
+                        )}
+                      </Button>
+                    )}
                   </>
                 )}
                 <Button

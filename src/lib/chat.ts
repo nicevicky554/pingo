@@ -103,6 +103,8 @@ export async function sendMessage(input: {
   durationSeconds?: number | null;
   waveform?: number[] | null;
   replyToId?: string | null;
+  statusReplyTo?: string | null;
+  topicId?: string | null;
   disappearSeconds?: number | null;
   viewOnce?: boolean;
 }) {
@@ -120,6 +122,8 @@ export async function sendMessage(input: {
     attachment_mime: input.attachmentMime ?? null,
     duration_seconds: input.durationSeconds ?? null,
     reply_to_id: input.replyToId ?? null,
+    status_reply_to: input.statusReplyTo ?? null,
+    topic_id: input.topicId ?? null,
     expires_at: expiresAt,
     view_once: input.viewOnce === true,
   };

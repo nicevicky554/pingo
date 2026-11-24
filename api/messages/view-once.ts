@@ -5,7 +5,7 @@
  * removes the Storage object and clears the message's attachment reference so
  * it cannot be fetched again from chat history.
  */
-import { createClient } from "@supabase/supabase-js";
+import { serverSupabase } from "../_lib/supabase";
 
 type NodeRequest = {
   method?: string;
@@ -20,10 +20,6 @@ type NodeResponse = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function pick(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.length > 0);
-}
-
 export default async function handler(req: NodeRequest, res: NodeResponse) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/json");
@@ -32,12 +28,8 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const secretKey = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!supabaseUrl || !secretKey) {
+  const server = serverSupabase();
+  if (!server) {
     res.status(500).json({ error: "Server Supabase credentials are missing." });
     return;
   }
@@ -58,9 +50,7 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const admin = createClient(supabaseUrl, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  const admin = server.admin;
   const { data: userData, error: userError } = await admin.auth.getUser(token);
   if (userError || !userData.user) {
     res.status(401).json({ error: "Your session is no longer valid." });

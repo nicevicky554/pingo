@@ -145,6 +145,12 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordingPaused, setRecordingPaused] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [cancelArmed, setCancelArmed] = useState(false);
+  const holdStartRef = useRef<{ x: number; y: number } | null>(null);
+  const holdReleasedRef = useRef(false);
+  const suppressMicClickRef = useRef(false);
   const [pendingVoice, setPendingVoice] = useState<{
     blob: Blob;
     url: string;
@@ -336,6 +342,12 @@ export function Composer({
       recorderRef.current = recorder;
       setRecording(true);
       onActivity?.("recording");
+      // The permission prompt can outlive the touch gesture; if the user has
+      // already released, do not leave an orphaned recording running.
+      if (holdReleasedRef.current) {
+        stopRecording(false);
+        return;
+      }
       timerRef.current = window.setInterval(() => {
         secondsRef.current += 1;
         setRecordSeconds(secondsRef.current);
@@ -355,14 +367,55 @@ export function Composer({
         setLivePeaks([...peaksRef.current]);
       }, 120);
     } catch {
+      setHolding(false);
+      setLocked(false);
+      setCancelArmed(false);
       setError("Microphone access was blocked. Allow it in your browser settings.");
     }
   }
 
   function stopRecording(cancel = false) {
     cancelRef.current = cancel;
+    setHolding(false);
+    setLocked(false);
+    setCancelArmed(false);
+    holdStartRef.current = null;
     recorderRef.current?.stop();
   }
+
+  // Touch gestures while the recording row replaces the composer:
+  // slide up to lock hands-free, slide left to cancel, release to stop.
+  useEffect(() => {
+    if (!holding) return;
+    const move = (event: PointerEvent) => {
+      const start = holdStartRef.current;
+      if (!start) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (dy < -56) setLocked(true);
+      setCancelArmed(dx < -80 && Math.abs(dx) > Math.abs(dy));
+    };
+    const end = () => {
+      setHolding(false);
+      holdReleasedRef.current = true;
+      holdStartRef.current = null;
+      if (!recorderRef.current) return;
+      if (cancelArmed) {
+        stopRecording(true);
+        return;
+      }
+      // A locked recording keeps running until the user taps stop.
+      if (!locked) stopRecording(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [holding, locked, cancelArmed]);
 
   function toggleRecordingPause() {
     const recorder = recorderRef.current;
@@ -687,6 +740,21 @@ export function Composer({
       )}
 
       {recording ? (
+        <>
+          {(holding || locked) && (
+            <p
+              className={cn(
+                "mb-1 text-center text-[0.65rem] font-medium",
+                cancelArmed ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {cancelArmed
+                ? "Release to cancel"
+                : locked
+                  ? "Recording locked — tap stop to review"
+                  : "Slide up to lock · slide left to cancel"}
+            </p>
+          )}
         <div className="flex items-center gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-2.5 py-2">
           <span className="size-2 shrink-0 animate-pulse rounded-full bg-destructive" />
           <span className="shrink-0 text-xs font-medium tabular-nums">
@@ -743,6 +811,7 @@ export function Composer({
             <Square className="size-3.5" />
           </Button>
         </div>
+        </>
       ) : (
         <div className="flex items-end gap-1">
           {mobile ? (
@@ -846,7 +915,24 @@ export function Composer({
               type="button"
               size="icon"
               className="size-9 shrink-0 rounded-full"
-              onClick={() => void startRecording()}
+              onPointerDown={(event) => {
+                if (event.pointerType === "mouse") return;
+                suppressMicClickRef.current = true;
+                holdReleasedRef.current = false;
+                holdStartRef.current = { x: event.clientX, y: event.clientY };
+                setLocked(false);
+                setCancelArmed(false);
+                setHolding(true);
+                void startRecording();
+              }}
+              onClick={() => {
+                if (suppressMicClickRef.current) {
+                  suppressMicClickRef.current = false;
+                  return;
+                }
+                void startRecording();
+              }}
+              onContextMenu={(event) => event.preventDefault()}
               aria-label="Record a voice note"
             >
               <Mic className="size-[19px]" />

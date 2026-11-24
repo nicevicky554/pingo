@@ -12,7 +12,7 @@ import type { Channel, Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Hash, Loader2, MessageSquare, Search, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 type Tab = "people" | "messages" | "channels";
 type MessageHit = {
@@ -20,14 +20,17 @@ type MessageHit = {
   conversation_id: string;
   body: string;
   created_at: string;
+  sender_id: string;
 };
 
 export default function SearchPage() {
   const { profile } = useAuth();
   const statusRings = useStatusRings();
   const navigate = useNavigate();
-  const [term, setTerm] = useState("");
-  const [tab, setTab] = useState<Tab>("people");
+  const [params] = useSearchParams();
+  const messageAuthor = params.get("user");
+  const [term, setTerm] = useState(params.get("q") ?? "");
+  const [tab, setTab] = useState<Tab>(messageAuthor ? "messages" : "people");
   const [people, setPeople] = useState<Profile[]>([]);
   const [messages, setMessages] = useState<MessageHit[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -62,13 +65,23 @@ export default function SearchPage() {
     return () => window.clearTimeout(timeout);
   }, [profile, term]);
 
+  // A profile can jump straight into that person's messages; the regular
+  // search remains global when no author filter is present.
+  const shownMessages = useMemo(
+    () =>
+      messageAuthor
+        ? messages.filter((message) => message.sender_id === messageAuthor)
+        : messages,
+    [messageAuthor, messages],
+  );
+
   const counts = useMemo(
     () => ({
       people: people.length,
-      messages: messages.length,
+      messages: shownMessages.length,
       channels: channels.length,
     }),
-    [channels.length, messages.length, people.length],
+    [channels.length, shownMessages.length, people.length],
   );
 
   async function openPerson(person: Profile) {
@@ -165,10 +178,16 @@ export default function SearchPage() {
             ))
           )
         ) : tab === "messages" ? (
-          messages.length === 0 ? (
-            <Empty label="No messages found" />
+          shownMessages.length === 0 ? (
+            <Empty
+              label={
+                messageAuthor
+                  ? "No messages from this person found"
+                  : "No messages found"
+              }
+            />
           ) : (
-            messages.map((message) => (
+            shownMessages.map((message) => (
               <button
                 key={message.id}
                 type="button"

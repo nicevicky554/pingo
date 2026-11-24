@@ -465,6 +465,7 @@ export default function UpdatesPage() {
               conversationId,
               senderId: profile.id,
               body: message,
+              statusReplyTo: viewerGroup.statuses[viewerIndex].id,
             });
             setViewerGroup(null);
           }}

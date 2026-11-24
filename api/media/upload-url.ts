@@ -9,9 +9,9 @@
  * Supabase Storage with the short-lived signed token.
  */
 
-import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { rateLimit } from "../_lib/rate-limit";
+import { serverSupabase } from "../_lib/supabase";
 
 type NodeRequest = {
   method?: string;
@@ -25,10 +25,6 @@ type NodeResponse = {
   json: (body: unknown) => void;
 };
 
-function pick(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.length > 0);
-}
-
 const MAX_BYTES = 25 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -41,12 +37,8 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const secretKey = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!supabaseUrl || !secretKey) {
+  const server = serverSupabase();
+  if (!server) {
     res.status(500).json({
       error:
         "Server Supabase credentials are not configured (SUPABASE_URL / SUPABASE_SECRET_KEY).",
@@ -80,11 +72,9 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  // Dedicated privileged client: no persisted session and no forwarded user
+  // Shared privileged client: no persisted session and no forwarded user
   // Authorization header. The user is verified separately below.
-  const admin = createClient(supabaseUrl, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  const admin = server.admin;
 
   const { data: userData, error: userError } = await admin.auth.getUser(token);
   if (userError || !userData.user) {

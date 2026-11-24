@@ -13,11 +13,16 @@ import {
   Bell,
   BellOff,
   Camera,
+  Hash,
   Loader2,
   LogOut,
+  Megaphone,
+  Plus,
   Search,
+  ShieldCheck,
   UserPlus,
   UsersRound,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -51,6 +56,10 @@ export default function GroupInfoPage() {
   const [adding, setAdding] = useState(false);
   const [term, setTerm] = useState("");
   const [results, setResults] = useState<Profile[]>([]);
+  const [topics, setTopics] = useState<{ id: string; title: string }[]>([]);
+  const [topicTitle, setTopicTitle] = useState("");
+  const [topicSaving, setTopicSaving] = useState(false);
+  const [roleBusy, setRoleBusy] = useState<string | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -79,6 +88,12 @@ export default function GroupInfoPage() {
         .maybeSingle();
       setMuted(Boolean((membership as { muted?: boolean } | null)?.muted));
     }
+    const { data: topicRows } = await supabase
+      .from("conversation_topics")
+      .select("id,title")
+      .eq("conversation_id", conversationId)
+      .order("created_at");
+    setTopics((topicRows ?? []) as { id: string; title: string }[]);
     setLoading(false);
   }, [conversationId, profile]);
 
@@ -164,6 +179,59 @@ export default function GroupInfoPage() {
       setResults([]);
       await load();
     }
+  }
+
+  async function createTopic() {
+    if (!conversationId || !profile || !topicTitle.trim() || topicSaving) return;
+    setTopicSaving(true);
+    const { data, error: insertError } = await supabase
+      .from("conversation_topics")
+      .insert({
+        conversation_id: conversationId,
+        title: topicTitle.trim(),
+        created_by: profile.id,
+      })
+      .select("id,title")
+      .single();
+    if (insertError) setError(insertError.message);
+    else if (data) {
+      setTopics((current) => [...current, data as { id: string; title: string }]);
+      setTopicTitle("");
+    }
+    setTopicSaving(false);
+  }
+
+  async function deleteTopic(topicId: string) {
+    const { error: deleteError } = await supabase
+      .from("conversation_topics")
+      .delete()
+      .eq("id", topicId);
+    if (deleteError) setError(deleteError.message);
+    else setTopics((current) => current.filter((topic) => topic.id !== topicId));
+  }
+
+  async function setMemberRole(userId: string, next: "admin" | "member") {
+    if (!conversationId) return;
+    setRoleBusy(userId);
+    const { error: updateError } = await supabase
+      .from("conversation_members")
+      .update({ role: next })
+      .eq("conversation_id", conversationId)
+      .eq("user_id", userId);
+    if (updateError) setError(updateError.message);
+    else await load();
+    setRoleBusy(null);
+  }
+
+  async function toggleAnnounceOnly() {
+    if (!conversationId || !group) return;
+    const next = !group.announce_only;
+    const { error: updateError } = await supabase
+      .from("conversations")
+      .update({ announce_only: next })
+      .eq("id", conversationId);
+    if (updateError) setError(updateError.message);
+    else setGroup((current) => (current ? { ...current, announce_only: next } : current));
   }
 
   async function leave() {
@@ -321,6 +389,20 @@ export default function GroupInfoPage() {
               <span className="flex-1">Add members</span>
             </button>
           )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => void toggleAnnounceOnly()}
+              className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left text-sm hover:bg-secondary/60"
+            >
+              <Megaphone className="size-4 text-primary" />
+              <span className="flex-1">
+                {group.announce_only
+                  ? "Allow all members to post"
+                  : "Restrict posting to admins"}
+              </span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void leave()}
@@ -374,6 +456,65 @@ export default function GroupInfoPage() {
         )}
 
         <h3 className="mt-6 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          Topics
+        </h3>
+        <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
+          {topics.length === 0 && (
+            <p className="px-4 py-3 text-xs text-muted-foreground">
+              No topics yet. Topics keep longer group conversations organised.
+            </p>
+          )}
+          {topics.map((topic) => (
+            <div
+              key={topic.id}
+              className="flex items-center gap-2.5 border-b border-border px-4 py-2.5 last:border-b-0"
+            >
+              <Hash className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-sm">{topic.title}</span>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => void deleteTopic(topic.id)}
+                  aria-label={`Remove ${topic.title}`}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+          {canManage && (
+            <div className="flex items-center gap-2 border-t border-border px-3 py-2.5">
+              <Input
+                value={topicTitle}
+                onChange={(event) => setTopicTitle(event.target.value)}
+                placeholder="New topic name"
+                maxLength={60}
+                className="h-9"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void createTopic();
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                onClick={() => void createTopic()}
+                disabled={!topicTitle.trim() || topicSaving}
+              >
+                {topicSaving ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                Add
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <h3 className="mt-6 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           Members
         </h3>
         <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
@@ -392,6 +533,24 @@ export default function GroupInfoPage() {
                   @{member.profile?.username ?? "unknown"}
                 </p>
               </div>
+              {canManage &&
+                member.role !== "owner" &&
+                member.user_id !== profile?.id && (
+                  <button
+                    type="button"
+                    disabled={roleBusy === member.user_id}
+                    onClick={() =>
+                      void setMemberRole(
+                        member.user_id,
+                        member.role === "admin" ? "member" : "admin",
+                      )
+                    }
+                    className="flex items-center gap-1 text-[0.62rem] font-medium text-primary disabled:opacity-50"
+                  >
+                    <ShieldCheck className="size-3" />
+                    {member.role === "admin" ? "Remove admin" : "Make admin"}
+                  </button>
+                )}
               <span
                 className={cn(
                   "rounded-full px-2 py-0.5 text-[0.6rem] font-medium capitalize",

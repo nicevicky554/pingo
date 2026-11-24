@@ -6,8 +6,8 @@
  * and channel posting permission are checked independently.
  */
 
-import { createClient } from "@supabase/supabase-js";
 import { rateLimit } from "../_lib/rate-limit";
+import { serverSupabase } from "../_lib/supabase";
 
 type NodeRequest = {
   method?: string;
@@ -25,10 +25,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const KINDS = new Set(["text", "image", "video", "file", "voice"]);
 const MAX_BODY = 20_000;
 
-function pick(...values: Array<string | undefined>) {
-  return values.find((value) => value && value.length > 0);
-}
-
 export default async function handler(req: NodeRequest, res: NodeResponse) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/json");
@@ -37,12 +33,8 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const secretKey = pick(
-    process.env.SUPABASE_SECRET_KEY,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-  if (!supabaseUrl || !secretKey) {
+  const server = serverSupabase();
+  if (!server) {
     res.status(500).json({ error: "Server Supabase credentials are missing." });
     return;
   }
@@ -66,6 +58,8 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
   const attachmentMime = raw?.attachment_mime ? String(raw.attachment_mime) : null;
   const durationSeconds = raw?.duration_seconds != null ? Number(raw.duration_seconds) : null;
   const replyToId = raw?.reply_to_id ? String(raw.reply_to_id) : null;
+  const statusReplyTo = raw?.status_reply_to ? String(raw.status_reply_to) : null;
+  const topicId = raw?.topic_id ? String(raw.topic_id) : null;
   const expiresAt = raw?.expires_at ? String(raw.expires_at) : null;
   const viewOnce = raw?.view_once === true;
   const waveform = Array.isArray(raw?.waveform)
@@ -85,9 +79,7 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
 
-  const admin = createClient(supabaseUrl, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  const admin = server.admin;
   const { data: userData, error: userError } = await admin.auth.getUser(token);
   if (userError || !userData.user) {
     res.status(401).json({ error: "Your session is no longer valid." });
@@ -162,6 +154,51 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     }
   }
 
+  if (topicId) {
+    if (!UUID.test(topicId)) {
+      res.status(400).json({ error: "Invalid topic reference." });
+      return;
+    }
+    const { data: topic } = await admin
+      .from("conversation_topics")
+      .select("id")
+      .eq("id", topicId)
+      .eq("conversation_id", conversationId)
+      .maybeSingle();
+    if (!topic) {
+            res.status(400).json({ error: "That topic is not part of this group." });
+      return;
+    }
+  }
+
+  if (statusReplyTo) {
+    if (!UUID.test(statusReplyTo)) {
+      res.status(400).json({ error: "Invalid status reply reference." });
+      return;
+    }
+    const { data: status } = await admin
+      .from("status_updates")
+      .select("id,user_id,expires_at")
+      .eq("id", statusReplyTo)
+      .maybeSingle();
+    if (!status || new Date(status.expires_at).getTime() <= Date.now()) {
+      res.status(400).json({ error: "That status is no longer available." });
+      return;
+    }
+    const { data: author } = await admin
+      .from("conversation_members")
+      .select("user_id")
+      .eq("conversation_id", conversationId)
+      .eq("user_id", status.user_id)
+      .maybeSingle();
+    if (!author) {
+      res.status(400).json({
+        error: "The status author is not part of this conversation.",
+      });
+      return;
+    }
+  }
+
   const payload: Record<string, unknown> = {
     conversation_id: conversationId,
     sender_id: userId,
@@ -173,6 +210,8 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     attachment_mime: attachmentMime,
     duration_seconds: durationSeconds,
     reply_to_id: replyToId,
+    status_reply_to: statusReplyTo,
+    topic_id: topicId,
     expires_at: expiresAt,
     view_once: viewOnce,
   };

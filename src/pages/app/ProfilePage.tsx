@@ -16,6 +16,7 @@ import {
   Loader2,
   MessageSquare,
   Phone,
+  Search,
   Settings,
   Share2,
   ShieldOff,
@@ -357,6 +358,15 @@ export default function ProfilePage() {
               >
                 <UserPlus className="size-4 text-primary" />
                 {isContact ? "Saved in your contacts" : "Add to contacts"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/app/search?user=${person.id}&q=`)
+                }
+                className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left text-sm hover:bg-secondary/60"
+              >
+                <Search className="size-4 text-muted-foreground" /> Search messages
               </button>
               <button
                 type="button"

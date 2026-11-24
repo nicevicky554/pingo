@@ -15,7 +15,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { signedMediaUrl } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
-import { bytesLabel, durationLabel, timeOf } from "@/lib/format";
+import { bytesLabel, timeOf } from "@/lib/format";
 import type { Message, Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -40,8 +40,109 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🙏", "👀"];
+
+/**
+ * Status replies keep their context in the conversation. While the status is
+ * still inside its 24h window we show a real signed thumbnail; afterwards the
+ * row is already hidden by RLS and we show a neutral expired placeholder.
+ */
+function StatusReplyReference({ statusId }: { statusId: string }) {
+  const navigate = useNavigate();
+  const [state, setState] = useState<{
+    checked: boolean;
+    active: boolean;
+    userId: string | null;
+    label: string;
+    thumbnail: string | null;
+  }>({ checked: false, active: false, userId: null, label: "", thumbnail: null });
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const { data } = await supabase
+        .from("status_updates")
+        .select("user_id,kind,body,media_path,expires_at")
+        .eq("id", statusId)
+        .maybeSingle();
+      if (!alive) return;
+      const status = data as
+        | {
+            user_id: string;
+            kind: string;
+            body: string | null;
+            media_path: string | null;
+            expires_at: string;
+          }
+        | null;
+      if (!status || new Date(status.expires_at).getTime() <= Date.now()) {
+        setState((current) => ({ ...current, checked: true, active: false }));
+        return;
+      }
+      const thumbnail = status.media_path
+        ? await signedMediaUrl(status.media_path)
+        : null;
+      if (!alive) return;
+      setState({
+        checked: true,
+        active: true,
+        userId: status.user_id,
+        thumbnail,
+        label:
+          status.body?.trim() ||
+          (status.kind === "video" ? "Video status" : "Photo status"),
+      });
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [statusId]);
+
+  if (!state.checked) {
+    return <div className="mb-1.5 h-11 animate-pulse rounded-md bg-primary/5" />;
+  }
+  if (!state.active) {
+    return (
+      <div className="mb-1.5 rounded-md border border-border/60 bg-secondary/60 px-2 py-1.5 text-[0.68rem] text-muted-foreground">
+        This status is no longer available.
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        if (state.userId) {
+          navigate(`/app/updates?statusUser=${state.userId}`);
+        }
+      }}
+      className="mb-1.5 flex w-full items-center gap-2 overflow-hidden rounded-md border border-primary/25 bg-primary/5 p-1.5 text-left"
+    >
+      {state.thumbnail ? (
+        <img
+          src={state.thumbnail}
+          alt=""
+          className="size-9 shrink-0 rounded object-cover"
+        />
+      ) : (
+        <span className="flex size-9 shrink-0 items-center justify-center rounded bg-primary/10 text-sm">
+          ✎
+        </span>
+      )}
+      <span className="min-w-0">
+        <span className="block text-[0.6rem] font-semibold text-primary">
+          Replied to a status
+        </span>
+        <span className="block truncate text-[0.68rem] opacity-75">
+          {state.label.slice(0, 70)}
+        </span>
+      </span>
+    </button>
+  );
+}
 
 type ReceiptState = "sent" | "delivered" | "read";
 
@@ -559,6 +660,10 @@ export function MessageBubble({
                   : replyTo.body || (replyTo.kind === "image" ? "Photo" : "Attachment")}
               </p>
             </div>
+          )}
+
+          {message.status_reply_to && (
+            <StatusReplyReference statusId={message.status_reply_to} />
           )}
 
           <Attachment message={message} />

@@ -42,6 +42,7 @@ import { usePresence } from "@/providers/PresenceProvider";
 import { useCall } from "@/providers/CallProvider";
 import { useAuth } from "@/hooks/use-auth";
 import { useStatusRings } from "@/hooks/use-status-rings";
+import { cn } from "@/lib/utils";
 import {
   Archive,
   ArrowLeft,
@@ -95,6 +96,8 @@ export function ChatThread({
   const [forwarding, setForwarding] = useState<Message | null>(null);
   const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
   const [forwardBusy, setForwardBusy] = useState<string | null>(null);
+  const [topics, setTopics] = useState<{ id: string; title: string }[]>([]);
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
 
   const { online } = usePresence();
   const { startCall } = useCall();
@@ -111,6 +114,7 @@ export function ChatThread({
         outgoing: OutgoingMessage;
         onProgress: (percent: number) => void;
         replyToId: string | null;
+        topicId: string | null;
       }
     >(),
   );
@@ -188,6 +192,29 @@ export function ChatThread({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Group topics are a lightweight thread filter. They load once and are kept
+  // fresh by the topic management page; no extra realtime channel is needed.
+  useEffect(() => {
+    if (!isGroup) return;
+    let alive = true;
+    void (async () => {
+      const { data } = await supabase
+        .from("conversation_topics")
+        .select("id,title")
+        .eq("conversation_id", conversation.id)
+        .order("created_at");
+      if (!alive) return;
+      const rows = (data ?? []) as { id: string; title: string }[];
+      setTopics(rows);
+      setActiveTopicId((current) =>
+        current && rows.some((topic) => topic.id === current) ? current : null,
+      );
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [conversation.id, isGroup]);
 
   // Realtime: messages, receipts, reactions and typing over one private channel.
   useEffect(() => {
@@ -353,7 +380,7 @@ export function ChatThread({
   async function deliver(tempId: string) {
     const pending = pendingRef.current.get(tempId);
     if (!pending) return;
-    const { outgoing, onProgress, replyToId } = pending;
+    const { outgoing, onProgress, replyToId, topicId } = pending;
 
     setMessages((current) =>
       current.map((message) =>
@@ -386,6 +413,7 @@ export function ChatThread({
         durationSeconds: outgoing.durationSeconds ?? null,
         waveform: outgoing.waveform ?? null,
         replyToId,
+        topicId,
         disappearSeconds: conversation.disappear_seconds,
         viewOnce: outgoing.viewOnce,
       });
@@ -449,6 +477,7 @@ export function ChatThread({
       duration_seconds: outgoing.durationSeconds ?? null,
       waveform: outgoing.waveform ?? null,
       reply_to_id: replyTo?.id ?? null,
+      topic_id: isGroup ? activeTopicId : null,
       edited_at: null,
       deleted_at: null,
       created_at: now,
@@ -461,6 +490,7 @@ export function ChatThread({
       outgoing,
       onProgress,
       replyToId: replyTo?.id ?? null,
+      topicId: isGroup ? activeTopicId : null,
     });
     setMessages((current) => {
       const next = [...current, temp];
@@ -652,11 +682,15 @@ export function ChatThread({
     peer?.online_visibility === "everyone" &&
     online.has(peer.id);
 
+  const topicFilter = isGroup ? activeTopicId : null;
+  const topicMessages = topicFilter
+    ? messages.filter((message) => message.topic_id === topicFilter)
+    : messages;
   const visibleMessages = searchTerm.trim()
-    ? messages.filter((message) =>
+    ? topicMessages.filter((message) =>
         message.body.toLowerCase().includes(searchTerm.trim().toLowerCase()),
       )
-    : messages;
+    : topicMessages;
 
   const grouped = useMemo(() => {
     const groups: { day: string; items: Message[] }[] = [];
@@ -865,6 +899,38 @@ export function ChatThread({
         </div>
       )}
 
+      {isGroup && topics.length > 0 && (
+        <div className="thin-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-card/60 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setActiveTopicId(null)}
+            className={cn(
+              "shrink-0 rounded-full px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
+              activeTopicId === null
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-secondary",
+            )}
+          >
+            All messages
+          </button>
+          {topics.map((topic) => (
+            <button
+              key={topic.id}
+              type="button"
+              onClick={() => setActiveTopicId(topic.id)}
+              className={cn(
+                "max-w-[10rem] shrink-0 truncate rounded-full px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
+                activeTopicId === topic.id
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-secondary",
+              )}
+            >
+              # {topic.title}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error && (
         <div className="flex items-start gap-2 border-b border-border bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
           <span className="flex-1">{error}</span>
@@ -884,7 +950,9 @@ export function ChatThread({
             <UserAvatar profile={avatarProfile} size="lg" />
             <p className="mt-2 text-sm font-bold">{title}</p>
             <p className="max-w-xs text-xs text-muted-foreground">
-              No messages yet. Say hello — it arrives in real time.
+              {activeTopicId
+                ? "No messages in this topic yet. Send one below."
+                : "No messages yet. Say hello — it arrives in real time."}
             </p>
           </div>
         ) : (
