@@ -249,21 +249,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
         !recordedCallIds.current.has(current.callId)
       ) {
         recordedCallIds.current.add(current.callId);
-        const kindLabel = current.kind === "video" ? "video call" : "voice call";
-        const body =
-          state === "missed"
-            ? `missed a ${kindLabel}`
-            : state === "declined"
-              ? `declined a ${kindLabel}`
-              : state === "failed"
-                ? `${kindLabel} failed`
-                : `started a ${kindLabel}${duration ? ` (${Math.floor(duration / 60)}m ${duration % 60}s)` : ""}`;
-        void supabase.from("messages").insert({
-          conversation_id: current.conversationId,
-          sender_id: profile.id,
-          kind: "system",
-          body,
-        });
+        const callId = current.callId;
+        const outcome =
+          state === "missed" || state === "declined" || state === "failed" ? state : "ended";
+        void (async () => {
+          const { data } = await supabase.auth.getSession();
+          const token = data.session?.access_token;
+          if (!token) return;
+          const response = await fetch("/api/calls/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ callId, outcome, duration: duration ?? 0 }),
+          }).catch(() => null);
+          if (response && !response.ok) {
+            console.warn("[PINGO] call log rejected", response.status);
+          }
+        })();
       }
 
       pcRef.current?.getSenders().forEach((sender) => sender.track?.stop());
