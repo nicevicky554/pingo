@@ -212,6 +212,10 @@
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
 
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
   /* Liquid Glass is used only for floating controls, never for readable body
      surfaces. Text always sits on a high-opacity layer. */
   .glass {

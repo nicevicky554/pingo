@@ -50,6 +50,7 @@ import {
   Loader2,
   MoreVertical,
   Phone,
+  Pin,
   Search,
   Video,
   X,
@@ -98,6 +99,16 @@ export function ChatThread({
   const [forwardBusy, setForwardBusy] = useState<string | null>(null);
   const [topics, setTopics] = useState<{ id: string; title: string }[]>([]);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const [unreadDividerId, setUnreadDividerId] = useState<string | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  // Captured once per mount so later refreshes cannot move the divider.
+  const initialUnreadRef = useRef(conversation.unread);
+  // The parent passes an inline callback; keeping it in a ref stops the read
+  // effect from re-subscribing (and re-marking) on every list refresh.
+  const onChangedRef = useRef(onChanged);
+  useEffect(() => {
+    onChangedRef.current = onChanged;
+  }, [onChanged]);
 
   const { online } = usePresence();
   const { startCall } = useCall();
@@ -174,12 +185,33 @@ export function ChatThread({
       setMessages(visible);
       setReceipts(await listReceipts(visible.map((message) => message.id)));
       setReactions(await listReactions(visible.map((message) => message.id)));
-      await markConversationRead(
+
+      const unreadCount = initialUnreadRef.current;
+      if (unreadCount > 0) {
+        const incoming = visible.filter(
+          (message) => message.sender_id !== currentUserId && !message.deleted_at,
+        );
+        const firstUnread = incoming[Math.max(0, incoming.length - unreadCount)];
+        setUnreadDividerId(firstUnread?.id ?? null);
+      }
+
+      const { data: pinRows } = await supabase
+        .from("message_pins")
+        .select("message_id")
+        .eq("conversation_id", conversation.id);
+      setPinnedIds(
+        (pinRows ?? []).map((row) => (row as { message_id: string }).message_id),
+      );
+
+      const cleared = await markConversationRead(
         conversation.id,
         currentUserId,
         visible,
         receiptsEnabled,
       );
+      // The chat list must be told immediately; relying only on the realtime
+      // membership event left a stale badge when that event was missed.
+      if (cleared) onChangedRef.current();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Messages could not be loaded.",
@@ -190,8 +222,49 @@ export function ChatThread({
   }, [conversation.id, currentUserId, receiptsEnabled]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, [load]);
+
+  // Returning to the tab (or focusing the window) marks anything that arrived
+  // while the conversation was open, so the badge cannot survive a background
+  // period.
+  useEffect(() => {
+    const refreshRead = () => {
+      if (document.visibilityState !== "visible") return;
+      void markConversationRead(
+        conversation.id,
+        currentUserId,
+        messagesRef.current,
+        receiptsEnabled,
+      ).then((done) => {
+        if (done) onChangedRef.current();
+      });
+    };
+    window.addEventListener("focus", refreshRead);
+    document.addEventListener("visibilitychange", refreshRead);
+    return () => {
+      window.removeEventListener("focus", refreshRead);
+      document.removeEventListener("visibilitychange", refreshRead);
+    };
+  }, [conversation.id, currentUserId, receiptsEnabled]);
+
+  // Leaving the thread persists the read cursor; the parent then reloads the
+  // list, which is what actually removes the badge.
+  const leaveRef = useRef({ conversationId: conversation.id, userId: currentUserId });
+  useEffect(() => {
+    const snapshot = leaveRef.current;
+    return () => {
+      void markConversationRead(
+        snapshot.conversationId,
+        snapshot.userId,
+        messagesRef.current,
+        receiptsEnabled,
+      ).then((done) => {
+        if (done) onChangedRef.current();
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Group topics are a lightweight thread filter. They load once and are kept
   // fresh by the topic management page; no extra realtime channel is needed.
@@ -640,6 +713,29 @@ export function ChatThread({
     onChanged();
   }
 
+  async function togglePin(message: Message) {
+    const pinned = pinnedIds.includes(message.id);
+    if (pinned) {
+      const { error: unpinError } = await supabase
+        .from("message_pins")
+        .delete()
+        .match({ conversation_id: conversation.id, message_id: message.id });
+      if (unpinError) setError(unpinError.message);
+      else setPinnedIds((current) => current.filter((id) => id !== message.id));
+    } else {
+      const { error: pinError } = await supabase.from("message_pins").upsert(
+        {
+          conversation_id: conversation.id,
+          message_id: message.id,
+          pinned_by: currentUserId,
+        },
+        { onConflict: "conversation_id,message_id" },
+      );
+      if (pinError) setError(pinError.message);
+      else setPinnedIds((current) => [...current, message.id]);
+    }
+  }
+
   async function reportMessage(message: Message) {
     await supabase.from("moderation_reports").insert({
       reporter_id: currentUserId,
@@ -931,6 +1027,40 @@ export function ChatThread({
         </div>
       )}
 
+      {pinnedIds.length > 0 &&
+        (() => {
+          const pinnedMessage = messages.find(
+            (message) => message.id === pinnedIds[pinnedIds.length - 1],
+          );
+          if (!pinnedMessage) return null;
+          return (
+            <div className="flex items-center gap-2 border-b border-border bg-accent/40 px-3 py-2">
+              <Pin className="size-3.5 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[0.58rem] font-semibold uppercase tracking-[0.12em] text-primary">
+                  Pinned message
+                </p>
+                <p className="truncate text-xs text-foreground/90">
+                  {pinnedMessage.body ||
+                    (pinnedMessage.kind === "image"
+                      ? "Photo"
+                      : pinnedMessage.kind === "video"
+                        ? "Video"
+                        : "Attachment")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void togglePin(pinnedMessage)}
+                aria-label="Unpin message"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          );
+        })()}
+
       {error && (
         <div className="flex items-start gap-2 border-b border-border bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-700 dark:text-amber-300">
           <span className="flex-1">{error}</span>
@@ -1003,8 +1133,17 @@ export function ChatThread({
                   ).map(([emoji, users]) => ({ emoji, users }));
 
                   return (
+                    <div key={message.id}>
+                      {unreadDividerId === message.id && (
+                        <div className="my-3 flex items-center gap-2 px-2">
+                          <span className="h-px flex-1 bg-primary/30" />
+                          <span className="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-primary">
+                            Unread messages
+                          </span>
+                          <span className="h-px flex-1 bg-primary/30" />
+                        </div>
+                      )}
                     <MessageBubble
-                      key={message.id}
                       message={message}
                       own={message.sender_id === currentUserId}
                       sender={sender}
@@ -1025,6 +1164,8 @@ export function ChatThread({
                           : undefined
                       }
                       onForward={() => void openForward(message)}
+                      onTogglePin={() => void togglePin(message)}
+                      pinned={pinnedIds.includes(message.id)}
                       onReact={(emoji) => void toggleReaction(message, emoji)}
                       onEdit={(body) => editMessage(message, body)}
                       onDeleteForMe={() => void deleteForMe(message)}
@@ -1037,6 +1178,7 @@ export function ChatThread({
                           : () => void blockSender(message.sender_id)
                       }
                     />
+                    </div>
                   );
                 })}
               </div>

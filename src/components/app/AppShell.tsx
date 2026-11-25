@@ -44,35 +44,61 @@ function useUnreadChats(userId: string | undefined) {
   const [unread, setUnread] = useState(0);
   useEffect(() => {
     if (!userId) {
-      setUnread(0);
+      void Promise.resolve().then(() => setUnread(0));
       return;
     }
     let timer: number | null = null;
     const load = async () => {
-      const { data } = await supabase
+      // The RPC derives the total from the same read cursor as the chat list.
+      const { data, error: rpcError } = await supabase.rpc("pingo_unread_summary");
+      if (!rpcError) {
+        const summary = data as { messages?: number } | null;
+        setUnread(Number(summary?.messages) || 0);
+        return;
+      }
+      const { data: rows } = await supabase
         .from("conversation_list")
         .select("unread")
         .eq("user_id", userId);
       setUnread(
-        (data ?? []).reduce(
+        (rows ?? []).reduce(
           (sum, row) => sum + (Number((row as { unread?: number }).unread) || 0),
           0,
         ),
       );
+    };
+    const schedule = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 250);
     };
     void load();
     const channel = watchChannel("nav-unread")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
-        () => {
-          if (timer) window.clearTimeout(timer);
-          timer = window.setTimeout(() => void load(), 400);
+        schedule,
+      )
+      // Reading a conversation updates only the caller's membership cursor.
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversation_members",
+          filter: `user_id=eq.${userId}`,
         },
+        schedule,
       )
       .subscribe();
+    const refresh = () => {
+      if (document.visibilityState === "visible") schedule();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       if (timer) window.clearTimeout(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
       void supabase.removeChannel(channel);
     };
   }, [userId]);

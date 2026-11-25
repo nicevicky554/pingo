@@ -205,13 +205,24 @@ export async function markConversationRead(
   messages: Message[],
   sendReceipts = true,
 ) {
+  // Preferred path: one security-definer transaction moves the reader's cursor,
+  // writes receipts for incoming messages only and clears notifications for the
+  // conversation. The server derives the reader from the JWT; `userId` is used
+  // only by the legacy fallback below.
+  const { error: rpcError } = await supabase.rpc(
+    "pingo_mark_conversation_read",
+    { p_conversation_id: conversationId },
+  );
+  if (!rpcError) return true;
+
   const now = new Date().toISOString();
 
-  await supabase
+  const { error: cursorError } = await supabase
     .from("conversation_members")
     .update({ last_read_at: now })
     .eq("conversation_id", conversationId)
     .eq("user_id", userId);
+  if (cursorError) return false;
 
   // A device that has received the row can honestly acknowledge delivery even
   // when the reader has turned read receipts off.
@@ -230,7 +241,7 @@ export async function markConversationRead(
     });
   }
 
-  if (!sendReceipts) return;
+  if (!sendReceipts) return true;
 
   const receipts = messages
     .filter((message) => message.sender_id !== userId && !message.deleted_at)
@@ -246,6 +257,12 @@ export async function markConversationRead(
       .from("message_receipts")
       .upsert(receipts, { onConflict: "message_id,user_id" });
   }
+  return true;
+}
+
+export async function unreadSummary() {
+  const { data } = await supabase.rpc("pingo_unread_summary");
+  return (data ?? null) as { conversations?: number; messages?: number } | null;
 }
 
 export async function uploadChatAttachment(

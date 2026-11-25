@@ -6,6 +6,7 @@
  * their existing auth.users row, so they continue straight into the app.
  */
 
+import { getPhoneVerificationMode } from "../_lib/auth-mode";
 import { rateLimit } from "../_lib/rate-limit";
 import {
   MAX_OTP_ATTEMPTS,
@@ -67,6 +68,24 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
     return;
   }
   const { admin } = server;
+
+  if ((await getPhoneVerificationMode(admin)) === "none") {
+    // Only an existing account may complete a recovery code; verification must
+    // never become a side door for creating unverified accounts.
+    const { data: existing } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("phone", phone)
+      .maybeSingle();
+    if (!existing) {
+      res.status(404).json({
+        error:
+          "No PINGO account uses this number. Create an account with a PIN first.",
+        code: "account_not_found",
+      });
+      return;
+    }
+  }
 
   const { data: record, error: lookupError } = await admin
     .from("phone_otp_codes")

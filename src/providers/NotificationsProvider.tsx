@@ -127,6 +127,24 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           }
         },
       )
+      // A conversation read moves notification rows to read server-side; the
+      // bell must follow that change instead of keeping a stale badge.
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          if (cancelled) return;
+          const updated = payload.new as NotificationRow;
+          setItems((current) =>
+            current.map((item) => (item.id === updated.id ? updated : item)),
+          );
+        },
+      )
       .subscribe((status, error) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn("[PINGO] notification subscription:", status, error);

@@ -75,6 +75,9 @@ function StatusVisual({
 }) {
   const url = useSignedStatus(status.media_path);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const trimStart = Number(status.trim_start_seconds ?? 0) || 0;
+  const trimEnd =
+    status.trim_end_seconds != null ? Number(status.trim_end_seconds) : null;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -84,12 +87,31 @@ function StatusVisual({
   }, [paused]);
 
   if (status.kind === "text" || !status.media_path) {
+    const fontCss =
+      status.font_family === "serif"
+        ? "Georgia, 'Times New Roman', serif"
+        : status.font_family === "mono"
+          ? "'Courier New', monospace"
+          : status.font_family === "rounded"
+            ? "'Trebuchet MS', 'Segoe UI', sans-serif"
+            : "Inter, system-ui, sans-serif";
     return (
       <div
-        className="flex size-full items-center justify-center px-8 py-16 text-center"
+        className="flex size-full items-center justify-center px-8 py-16"
         style={{ backgroundColor: status.background ?? "#0F5F63" }}
       >
-        <p className="max-w-lg text-[1.6rem] leading-snug font-semibold text-white whitespace-pre-wrap">
+        <p
+          className="max-w-lg whitespace-pre-wrap"
+          style={{
+            color: status.text_color ?? "#ffffff",
+            fontFamily: fontCss,
+            fontSize: `${status.font_size ?? 26}px`,
+            lineHeight: 1.35,
+            textAlign: status.text_align ?? "center",
+            fontWeight: 600,
+            width: "100%",
+          }}
+        >
           {status.body}
         </p>
       </div>
@@ -97,18 +119,38 @@ function StatusVisual({
   }
 
   const rotation = status.rotation ?? 0;
+  const overlayText = (status.overlay ?? [])
+    .filter((entry) => entry?.type === "text" && entry.text)
+    .map((entry) => entry.text)
+    .join("\n");
 
   if (status.kind === "video") {
     return url ? (
-      <video
-        ref={videoRef}
-        src={url}
-        autoPlay
-        playsInline
-        onEnded={onEnded}
-        className="size-full object-contain"
-        style={{ transform: `rotate(${rotation}deg)` }}
-      />
+      <div className="relative flex size-full items-center justify-center">
+        <video
+          ref={videoRef}
+          src={url}
+          autoPlay
+          playsInline
+          className="size-full object-contain"
+          style={{ transform: `rotate(${rotation}deg)` }}
+          onLoadedMetadata={(event) => {
+            if (trimStart > 0) event.currentTarget.currentTime = trimStart;
+          }}
+          onTimeUpdate={(event) => {
+            if (trimEnd != null && event.currentTarget.currentTime >= trimEnd) {
+              event.currentTarget.pause();
+              onEnded();
+            }
+          }}
+          onEnded={onEnded}
+        />
+        {overlayText && (
+          <p className="pointer-events-none absolute inset-x-4 bottom-16 text-center text-lg font-semibold whitespace-pre-wrap text-white drop-shadow">
+            {overlayText}
+          </p>
+        )}
+      </div>
     ) : (
       <div className="flex size-full items-center justify-center">
         <Loader2 className="size-6 animate-spin text-white" />
@@ -117,12 +159,19 @@ function StatusVisual({
   }
 
   return url ? (
-    <img
-      src={url}
-      alt={status.caption ?? "Status"}
-      className="size-full object-contain"
-      style={{ transform: `rotate(${rotation}deg)` }}
-    />
+    <div className="relative flex size-full items-center justify-center">
+      <img
+        src={url}
+        alt={status.caption ?? "Status"}
+        className="size-full object-contain"
+        style={{ transform: `rotate(${rotation}deg)` }}
+      />
+      {overlayText && (
+        <p className="pointer-events-none absolute inset-x-4 bottom-16 text-center text-lg font-semibold whitespace-pre-wrap text-white drop-shadow">
+          {overlayText}
+        </p>
+      )}
+    </div>
   ) : (
     <div className="flex size-full items-center justify-center">
       <Loader2 className="size-6 animate-spin text-white" />

@@ -1,6 +1,14 @@
 import { EmojiPicker } from "@/components/chat/EmojiPicker";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/lib/supabase";
+import type { Profile } from "@/lib/types";
+import {
   Drawer,
   DrawerContent,
   DrawerTitle,
@@ -18,17 +26,21 @@ import { cn } from "@/lib/utils";
 import {
   AudioLines,
   Camera,
+  Check,
   Eye,
   FileText,
   Image as ImageIcon,
   Loader2,
+  MapPin,
   Mic,
   Pause,
   Paperclip,
   Play,
+  PlayCircle,
   Send,
   Smile,
   Square,
+  UserRound,
   Video,
   X,
 } from "lucide-react";
@@ -43,6 +55,20 @@ export type OutgoingMessage = {
   waveform?: number[];
   viewOnce?: boolean;
 };
+
+type PickedAttachment = {
+  id: string;
+  file: File;
+  url: string | null;
+  kind: "image" | "video" | "file" | "voice";
+  duration?: number;
+};
+
+function mediaDuration(seconds: number | undefined) {
+  if (!seconds || !Number.isFinite(seconds)) return null;
+  const total = Math.round(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
 
 const MAX_FILE = 25 * 1024 * 1024;
 const BAR_COUNT = 40;
@@ -134,9 +160,14 @@ export function Composer({
   disabledReason?: string;
 }) {
   const mobile = useIsMobile();
+  const { profile: me } = useAuth();
   const draftKey = `pingo:draft:${conversationId}`;
   const [text, setText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
+  const [previewItem, setPreviewItem] = useState<PickedAttachment | null>(null);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contacts, setContacts] = useState<Profile[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
   const [viewOnce, setViewOnce] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendingCount, setSendingCount] = useState(0);
@@ -167,7 +198,6 @@ export function Composer({
 
   const imageInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
-  const videoInput = useRef<HTMLInputElement>(null);
   const docInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -183,7 +213,9 @@ export function Composer({
   const cancelRef = useRef(false);
 
   useEffect(() => {
-    setText(window.sessionStorage.getItem(draftKey) ?? "");
+    void Promise.resolve().then(() =>
+      setText(window.sessionStorage.getItem(draftKey) ?? ""),
+    );
   }, [draftKey]);
 
   useEffect(() => {
@@ -221,46 +253,47 @@ export function Composer({
 
   async function submit() {
     const body = text.trim();
-    if ((!body && files.length === 0) || sendingRef.current) return;
+    if ((!body && attachments.length === 0) || sendingRef.current) return;
     sendingRef.current = true;
-    const attachments = [...files];
+    const selected = [...attachments];
     const sendAsViewOnce = viewOnce;
     setSending(true);
-    setSendingCount(attachments.length);
-    setProgress(attachments.length > 0 ? 0 : 100);
+    setSendingCount(selected.length);
+    setProgress(selected.length > 0 ? 0 : 100);
     setError(null);
-    // Clear immediately; optimistic messages are already in the thread.
+    // Clear immediately; optimistic messages are already in the thread and keep
+    // their own blob for retry.
     setText("");
-    setFiles([]);
+    setAttachments([]);
     setViewOnce(false);
     window.sessionStorage.removeItem(draftKey);
-    if (attachments.length > 0) onActivity?.("uploading");
+    if (selected.length > 0) onActivity?.("uploading");
     try {
-      if (attachments.length === 0) {
+      if (selected.length === 0) {
         await onSend({ body, kind: "text" }, setProgress);
       } else {
-        for (const [index, attachment] of attachments.entries()) {
+        for (const [index, attachment] of selected.entries()) {
           await onSend(
             {
               body: index === 0 ? body : "",
-              file: attachment,
-              fileName: attachment.name,
-              kind: attachment.type.startsWith("image/")
-                ? "image"
-                : attachment.type.startsWith("video/")
-                  ? "video"
-                  : "file",
+              file: attachment.file,
+              fileName: attachment.file.name,
+              kind: attachment.kind === "voice" ? "file" : attachment.kind,
+              durationSeconds:
+                attachment.kind === "video" ? attachmentDuration(attachment) : undefined,
               viewOnce:
                 sendAsViewOnce &&
-                (attachment.type.startsWith("image/") ||
-                  attachment.type.startsWith("video/")),
+                (attachment.kind === "image" || attachment.kind === "video"),
             },
             (percent) =>
               setProgress(
-                Math.round(((index + percent / 100) / attachments.length) * 100),
+                Math.round(((index + percent / 100) / selected.length) * 100),
               ),
           );
         }
+      }
+      for (const attachment of selected) {
+        if (attachment.url) URL.revokeObjectURL(attachment.url);
       }
       onCancelReply?.();
     } catch (err) {
@@ -274,6 +307,12 @@ export function Composer({
     }
   }
 
+  function attachmentDuration(attachment: PickedAttachment) {
+    return attachment.duration && attachment.duration > 0
+      ? Math.round(attachment.duration)
+      : undefined;
+  }
+
   function pickFiles(event: React.ChangeEvent<HTMLInputElement>) {
     const next = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -285,13 +324,97 @@ export function Composer({
       return;
     }
     setError(null);
-    setFiles((current) => {
-      const seen = new Set(current.map((item) => `${item.name}:${item.size}`));
-      return [
-        ...current,
-        ...next.filter((item) => !seen.has(`${item.name}:${item.size}`)),
-      ].slice(0, 10);
+    setAttachments((current) => {
+      const seen = new Set(current.map((item) => `${item.file.name}:${item.file.size}`));
+      const picked: PickedAttachment[] = next
+        .filter((item) => !seen.has(`${item.name}:${item.size}`))
+        .map((item) => ({
+          id: crypto.randomUUID(),
+          file: item,
+          url:
+            item.type.startsWith("image/") || item.type.startsWith("video/")
+              ? URL.createObjectURL(item)
+              : null,
+          kind: item.type.startsWith("image/")
+            ? "image"
+            : item.type.startsWith("video/")
+              ? "video"
+              : item.type.startsWith("audio/")
+                ? "voice"
+                : "file",
+        }));
+      return [...current, ...picked].slice(0, 10);
     });
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target?.url) URL.revokeObjectURL(target.url);
+      return current.filter((item) => item.id !== id);
+    });
+  }
+
+  async function shareLocation() {
+    setMenuOpen(false);
+    if (!navigator.geolocation) {
+      setError("This browser cannot read your location.");
+      return;
+    }
+    setError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        const link = `https://maps.google.com/?q=${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+        try {
+          await onSend(
+            { body: `Live location: ${link}`, kind: "text" },
+            () => undefined,
+          );
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Location could not be sent.");
+        }
+      },
+      () => setError("Location permission was denied."),
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
+  }
+
+  async function openContacts() {
+    setMenuOpen(false);
+    setContactOpen(true);
+    if (!me || contacts.length > 0) return;
+    setContactsLoading(true);
+    const { data: rows } = await supabase
+      .from("contacts")
+      .select("contact_id")
+      .eq("owner_id", me.id)
+      .limit(200);
+    const ids = (rows ?? []).map((row) => (row as { contact_id: string }).contact_id);
+    if (ids.length > 0) {
+      const { data: people } = await supabase
+        .from("public_profiles")
+        .select("*")
+        .in("id", ids);
+      setContacts((people ?? []) as Profile[]);
+    }
+    setContactsLoading(false);
+  }
+
+  async function sendContact(person: Profile) {
+    const name = person.display_name || person.username || "PINGO user";
+    setContactOpen(false);
+    try {
+      await onSend(
+        {
+          body: `Contact: ${name}${person.username ? ` (@${person.username})` : ""}`,
+          kind: "text",
+        },
+        () => undefined,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Contact could not be sent.");
+    }
   }
 
   async function startRecording() {
@@ -453,19 +576,27 @@ export function Composer({
     }
   }
 
-  const attachments = [
-    { label: "Photos", icon: ImageIcon, ref: imageInput, accept: "image/*" },
+  const attachOptions = [
+    { label: "Gallery", hint: "Photos and videos", icon: ImageIcon, ref: imageInput },
     {
       label: "Camera",
+      hint: "Take a photo",
       icon: Camera,
       ref: cameraInput,
-      accept: "image/*",
-      capture: true,
     },
-    { label: "Video", icon: Video, ref: videoInput, accept: "video/*" },
-    { label: "Document", icon: FileText, ref: docInput, accept: "*/*" },
-    { label: "Audio", icon: AudioLines, ref: audioInput, accept: "audio/*" },
+    { label: "Document", hint: "Any file up to 25 MB", icon: FileText, ref: docInput },
+    { label: "Audio", hint: "Music or a recording", icon: AudioLines, ref: audioInput },
   ] as const;
+
+  useEffect(() => {
+    return () => {
+      for (const item of attachments) {
+        if (item.url) URL.revokeObjectURL(item.url);
+      }
+    };
+    // Only on unmount; individual removals revoke their own URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (disabled) {
     return (
@@ -476,23 +607,58 @@ export function Composer({
   }
 
   const menu = (
-    <div className={cn(mobile ? "space-y-1 p-2 pb-4" : "w-56 p-1.5")}>
-      {attachments.map((item) => {
+    <div className={cn(mobile ? "grid grid-cols-2 gap-1 p-3 pb-6" : "w-64 p-1.5")}>
+      {attachOptions.map((item) => {
         const Icon = item.icon;
         return (
           <button
             key={item.label}
             type="button"
             onClick={() => item.ref.current?.click()}
-            className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors hover:bg-secondary"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-secondary"
           >
-            <span className="flex size-8 items-center justify-center rounded-full bg-secondary text-primary">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
               <Icon className="size-4" />
             </span>
-            {item.label}
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{item.label}</span>
+              <span className="block truncate text-[0.62rem] text-muted-foreground">
+                {item.hint}
+              </span>
+            </span>
           </button>
         );
       })}
+      <button
+        type="button"
+        onClick={() => void shareLocation()}
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-secondary"
+      >
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
+          <MapPin className="size-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">Location</span>
+          <span className="block truncate text-[0.62rem] text-muted-foreground">
+            Share where you are
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => void openContacts()}
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-secondary"
+      >
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
+          <UserRound className="size-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">Contact</span>
+          <span className="block truncate text-[0.62rem] text-muted-foreground">
+            Share a saved contact
+          </span>
+        </span>
+      </button>
     </div>
   );
 
@@ -501,7 +667,7 @@ export function Composer({
       <input
         ref={imageInput}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         multiple
         className="hidden"
         onChange={pickFiles}
@@ -514,13 +680,7 @@ export function Composer({
         className="hidden"
         onChange={pickFiles}
       />
-      <input
-        ref={videoInput}
-        type="file"
-        accept="video/*"
-        className="hidden"
-        onChange={pickFiles}
-      />
+
       <input
         ref={docInput}
         type="file"
@@ -556,34 +716,99 @@ export function Composer({
         </div>
       )}
 
-      {files.length > 0 && (
-        <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-          {files.map((attachment) => (
-            <SelectedAttachment
-              key={`${attachment.name}:${attachment.size}:${attachment.lastModified}`}
-              file={attachment}
-              onRemove={() =>
-                setFiles((current) =>
-                  current.filter((item) => item !== attachment),
-                )
-              }
-            />
-          ))}
-          {files.some(
-            (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
+      {attachments.length > 0 && (
+        <div className="mb-2 rounded-lg border border-border bg-secondary/40 p-2">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-[0.68rem] font-semibold">
+              {attachments.length} attachment{attachments.length === 1 ? "" : "s"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="text-[0.65rem] font-medium text-primary"
+            >
+              Add more
+            </button>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {attachments.map((attachment) => (
+              <div
+                key={attachment.id}
+                className="group relative aspect-square overflow-hidden rounded-md border border-border bg-card"
+              >
+                <button
+                  type="button"
+                  onClick={() => setPreviewItem(attachment)}
+                  className="size-full"
+                  aria-label={`Preview ${attachment.file.name}`}
+                >
+                  {attachment.kind === "image" && attachment.url ? (
+                    <img
+                      src={attachment.url}
+                      alt={attachment.file.name}
+                      className="size-full object-cover"
+                    />
+                  ) : attachment.kind === "video" && attachment.url ? (
+                    <span className="relative block size-full bg-black">
+                      <video
+                        src={attachment.url}
+                        className="size-full object-cover"
+                        preload="metadata"
+                        muted
+                        onLoadedMetadata={(event) => {
+                          const duration = event.currentTarget.duration;
+                          if (!Number.isFinite(duration)) return;
+                          setAttachments((current) =>
+                            current.map((entry) =>
+                              entry.id === attachment.id
+                                ? { ...entry, duration }
+                                : entry,
+                            ),
+                          );
+                        }}
+                      />
+                      <PlayCircle className="absolute top-1/2 left-1/2 size-5 -translate-x-1/2 -translate-y-1/2 text-white drop-shadow" />
+                    </span>
+                  ) : (
+                    <span className="flex size-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
+                      <FileText className="size-4" />
+                      <span className="line-clamp-2 text-center text-[0.55rem]">
+                        {attachment.file.name}
+                      </span>
+                    </span>
+                  )}
+                  <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 py-0.5 text-[0.5rem] font-semibold text-white">
+                    {mediaDuration(attachment.duration) ??
+                      `${(attachment.file.size / 1024 / 1024).toFixed(1)} MB`}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(attachment.id)}
+                  aria-label={`Remove ${attachment.file.name}`}
+                  className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/70 text-white"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+          {attachments.some(
+            (item) => item.kind === "image" || item.kind === "video",
           ) && (
             <button
               type="button"
               aria-pressed={viewOnce}
               onClick={() => setViewOnce((value) => !value)}
               className={cn(
-                "flex shrink-0 flex-col items-center justify-center gap-1 rounded-lg border px-2.5 text-[0.6rem] font-medium",
+                "mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md border py-1 text-[0.62rem] font-medium",
                 viewOnce
                   ? "border-primary bg-primary/10 text-primary"
-                  : "border-border bg-secondary/60 text-muted-foreground",
+                  : "border-border bg-card text-muted-foreground",
               )}
             >
-              <Eye className="size-4" /> 1×
+              <Eye className="size-3.5" />
+              {viewOnce ? "View once enabled" : "Send view once"}
             </button>
           )}
         </div>
@@ -895,7 +1120,7 @@ export function Composer({
             )}
           />
 
-          {text.trim() || files.length > 0 ? (
+          {text.trim() || attachments.length > 0 ? (
             <Button
               type="button"
               size="icon"
@@ -940,6 +1165,93 @@ export function Composer({
           )}
         </div>
       )}
+
+      <Dialog
+        open={Boolean(previewItem)}
+        onOpenChange={(open) => {
+          if (!open) setPreviewItem(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl border-0 bg-black/95 p-0 text-white">
+          <DialogTitle className="sr-only">Attachment preview</DialogTitle>
+          <div className="flex items-center justify-between px-3 py-2">
+            <p className="min-w-0 truncate text-xs text-white/80">
+              {previewItem?.file.name}
+            </p>
+            <button
+              type="button"
+              onClick={() => setPreviewItem(null)}
+              aria-label="Close preview"
+              className="rounded-md p-1.5 text-white/80 hover:bg-white/10"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <div className="flex max-h-[75dvh] items-center justify-center overflow-hidden p-2">
+            {previewItem?.kind === "image" && previewItem.url ? (
+              <img
+                src={previewItem.url}
+                alt={previewItem.file.name}
+                className="max-h-[70dvh] w-auto max-w-full object-contain"
+              />
+            ) : previewItem?.kind === "video" && previewItem.url ? (
+              <video
+                src={previewItem.url}
+                controls
+                autoPlay
+                className="max-h-[70dvh] w-full rounded-md"
+              />
+            ) : previewItem ? (
+              <div className="px-6 py-10 text-center text-sm text-white/70">
+                {previewItem.file.name} ·{" "}
+                {(previewItem.file.size / 1024).toFixed(0)} KB
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={contactOpen} onOpenChange={setContactOpen}>
+        <DialogContent className="max-w-md">
+          <DialogTitle>Share a contact</DialogTitle>
+          {contactsLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : contacts.length === 0 ? (
+            <p className="py-6 text-center text-xs leading-5 text-muted-foreground">
+              You have no saved contacts yet. Open a profile and choose "Add to
+              contacts" first.
+            </p>
+          ) : (
+            <div className="thin-scrollbar max-h-80 overflow-y-auto">
+              {contacts.map((person) => (
+                <button
+                  key={person.id}
+                  type="button"
+                  onClick={() => void sendContact(person)}
+                  className="flex w-full items-center gap-3 rounded-md px-2 py-2.5 text-left hover:bg-secondary"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-primary">
+                    {(person.display_name || person.username || "P")
+                      .slice(0, 1)
+                      .toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {person.display_name || person.username}
+                    </span>
+                    <span className="block truncate text-[0.65rem] text-muted-foreground">
+                      @{person.username}
+                    </span>
+                  </span>
+                  <Check className="size-4 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

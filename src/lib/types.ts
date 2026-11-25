@@ -116,6 +116,14 @@ export type StatusUpdate = {
   background: string | null;
   caption: string | null;
   rotation?: number;
+  text_color?: string | null;
+  font_family?: string | null;
+  font_size?: number | null;
+  text_align?: "left" | "center" | "right" | null;
+  overlay?: { type: string; text: string; x?: number; y?: number }[] | null;
+  trim_start_seconds?: number | null;
+  trim_end_seconds?: number | null;
+  media_meta?: { name?: string; size?: number; mime?: string; duration?: number | null } | null;
   created_at: string;
   expires_at: string;
   profile?: Profile | null;
@@ -129,6 +137,8 @@ export type Channel = {
   description: string | null;
   avatar_url: string | null;
   is_public: boolean;
+  comments_enabled?: boolean;
+  invite_code?: string | null;
   created_at: string;
   is_verified?: boolean;
 };

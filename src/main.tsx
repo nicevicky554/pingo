@@ -64,6 +64,7 @@ const ChannelPage = lazy(() => import("./pages/app/ChannelPage.tsx"));
 const ChannelComposePage = lazy(
   () => import("./pages/app/ChannelComposePage.tsx"),
 );
+const ChannelInfoPage = lazy(() => import("./pages/app/ChannelInfoPage.tsx"));
 const ChannelMembersPage = lazy(
   () => import("./pages/app/ChannelMembersPage.tsx"),
 );
@@ -261,6 +262,7 @@ function AppProviders() {
               path="channels/:channelId/compose"
               element={<ChannelComposePage />}
             />
+            <Route path="channels/:channelId/info" element={<ChannelInfoPage />} />
             <Route
               path="channels/:channelId/admins"
               element={<ChannelMembersPage mode="admins" />}

@@ -171,6 +171,20 @@ export default function ChatsPage() {
     };
   }, [load, profileId]);
 
+  // Coming back to the tab or window re-reads the list, so a badge cannot stay
+  // stale after messages were read in another device or tab.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [load]);
+
   useEffect(() => {
     const term = filter.trim();
     if (term.length < 2) {
@@ -478,8 +492,16 @@ export default function ChatsPage() {
                       to={`/app/channels/${channel.id}`}
                       className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-secondary/70"
                     >
-                      <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">
-                        <Radio className="size-5" />
+                      <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary text-primary">
+                        {channel.avatar_url ? (
+                          <img
+                            src={channel.avatar_url}
+                            alt={channel.name}
+                            className="size-full object-cover"
+                          />
+                        ) : (
+                          <Radio className="size-5" />
+                        )}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[0.86rem] font-semibold">
@@ -545,6 +567,9 @@ export default function ChatsPage() {
             onBack={() => {
               setActiveId(null);
               setSearchParams({}, { replace: true });
+              // Re-read the list after the read cursor moves so the badge is
+              // gone the moment the conversation is closed.
+              void load();
             }}
             onChanged={() => void load()}
           />

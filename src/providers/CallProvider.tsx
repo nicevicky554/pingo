@@ -14,6 +14,7 @@ import {
   Monitor,
   MonitorOff,
   Phone,
+  PhoneIncoming,
   PhoneOff,
   RefreshCw,
   SwitchCamera,
@@ -134,6 +135,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     packetLoss: number;
     rttMs: number;
   } | null>(null);
+  // Mobile browsers suspend audio until the page has had a user gesture. The
+  // banner stays usable either way, but tells the user when sound is blocked.
+  const [ringtoneBlocked, setRingtoneBlocked] = useState(false);
+  const ringContextRef = useRef<AudioContext | null>(null);
   const retryRef = useRef(0);
   const facingRef = useRef<"user" | "environment">("user");
   const lastBytesRef = useRef<{ bytes: number; at: number } | null>(null);
@@ -219,20 +224,27 @@ export function CallProvider({ children }: { children: ReactNode }) {
         ? Math.round((Date.now() - startedAtRef.current) / 1000)
         : null;
 
+      // A call that is hung up before media ever connected is a missed call, not
+      // a completed one. This is what makes the log read "Missed" on both ends.
+      const unanswered =
+        !startedAtRef.current &&
+        (current.phase === "outgoing" || current.phase === "incoming");
+      const finalState = state === "ended" && unanswered ? "missed" : state;
+
       void supabase
         .from("calls")
         .update({
-          status: state,
+          status: finalState,
           ended_at: new Date().toISOString(),
           duration_seconds: duration,
-          end_reason: state,
+          end_reason: finalState,
         })
         .eq("id", current.callId);
 
       const participantState =
-        state === "declined"
+        finalState === "declined"
           ? "declined"
-          : state === "missed"
+          : finalState === "missed"
             ? "missed"
             : "left";
       void supabase
@@ -243,7 +255,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       void sendSignal(current.peer.id, "call:end", {
         call_id: current.callId,
-        reason: state,
+        reason: finalState,
       });
 
       if (
@@ -256,11 +268,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
         recordedCallIds.current.add(current.callId);
         const kindLabel = current.kind === "video" ? "video call" : "voice call";
         const body =
-          state === "missed"
+          finalState === "missed"
             ? `missed a ${kindLabel}`
-            : state === "declined"
+            : finalState === "declined"
               ? `declined a ${kindLabel}`
-              : state === "failed"
+              : finalState === "failed"
                 ? `${kindLabel} failed`
                 : `started a ${kindLabel}${duration ? ` (${Math.floor(duration / 60)}m ${duration % 60}s)` : ""}`;
         void supabase.from("messages").insert({
@@ -293,10 +305,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
       lastBytesRef.current = null;
       setSession(null);
       sessionRef.current = null;
-      if (state === "missed") setNotice("No answer. The call was marked missed.");
-      if (state === "failed") setNotice("The call could not connect.");
+      if (finalState === "missed") {
+        setNotice(
+          current.isCaller
+            ? "No answer. The call was marked missed."
+            : "Missed call.",
+        );
+      }
+      if (finalState === "failed") setNotice("The call could not connect.");
     },
-    [profile?.id, sendSignal],
+    [profile, sendSignal],
   );
 
   /** Create the peer connection and attach local media. */
@@ -420,7 +438,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         return;
       }
       setNotice(null);
-      setSession({
+      const initial: CallSession = {
         phase: "outgoing",
         callId: "pending",
         conversationId,
@@ -429,7 +447,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         isCaller: true,
         muted: false,
         cameraOff: false,
-      });
+      };
+      sessionRef.current = initial;
+      setSession(initial);
 
       try {
         const { data: callRow, error } = await supabase
@@ -444,21 +464,31 @@ export function CallProvider({ children }: { children: ReactNode }) {
           .single();
         if (error) throw error;
 
-        await supabase.from("call_participants").insert({
-          call_id: callRow.id,
-          user_id: peer.id,
-          state: "invited",
-        });
+        // Adopt the real id before requesting media so a denied microphone is
+        // recorded as a failed call instead of leaving an orphan "ringing" row.
+        const current = sessionRef.current;
+        if (current) {
+          const next = { ...current, callId: callRow.id };
+          sessionRef.current = next;
+          setSession(next);
+        }
 
         const { pc } = await preparePeer(kind, peer.id, callRow.id);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        setSession((current) => {
-          if (!current) return current;
-          const next = { ...current, callId: callRow.id };
-          sessionRef.current = next;
-          return next;
+        // Persist the offer before the participant row. The participant insert
+        // fires the incoming-call notification, so a callee that missed the
+        // realtime broadcast can still load and answer the call from Postgres.
+        await supabase
+          .from("calls")
+          .update({ caller_offer: offer })
+          .eq("id", callRow.id);
+
+        await supabase.from("call_participants").insert({
+          call_id: callRow.id,
+          user_id: peer.id,
+          state: "invited",
         });
 
         await sendSignal(peer.id, "call:invite", {
@@ -504,6 +534,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const callId = String(payload.call_id ?? "");
       const caller = payload.caller as CallPeer | undefined;
       if (!callId || !caller?.id) return;
+      // The durable notification path may already have opened this same call;
+      // a late broadcast for it must never be treated as a second call.
+      if (current?.callId === callId) return;
 
       if (current) {
         // Already busy: decline the new call server-side.
@@ -536,13 +569,89 @@ export function CallProvider({ children }: { children: ReactNode }) {
       };
       sessionRef.current = next;
       setSession(next);
+      setMinimized(false);
     },
     [profile, sendSignal],
   );
 
+  /**
+   * Recover an incoming call from Postgres. The realtime broadcast is the fast
+   * path; this is the durable path when the invite arrived during a reconnect,
+   * a page reload, or a dropped private-topic message.
+   */
+  const loadPendingIncoming = useCallback(async () => {
+    if (!profile?.id || sessionRef.current) return;
+    const { data: parts } = await supabase
+      .from("call_participants")
+      .select("call_id")
+      .eq("user_id", profile.id)
+      .eq("state", "invited")
+      .limit(20);
+    const ids = (parts ?? [])
+      .map((row) => (row as { call_id?: string }).call_id)
+      .filter((id): id is string => Boolean(id));
+    if (ids.length === 0) return;
+
+    const { data } = await supabase
+      .from("calls")
+      .select("id,conversation_id,initiator_id,kind,caller_offer,started_at,status")
+      .in("id", ids)
+      .eq("status", "ringing")
+      .not("caller_offer", "is", null)
+      .gte("started_at", new Date(Date.now() - 45_000).toISOString())
+      .order("started_at", { ascending: false })
+      .limit(1);
+    const row = (data ?? [])[0] as
+      | {
+          id: string;
+          conversation_id: string | null;
+          initiator_id: string;
+          kind: "voice" | "video";
+          caller_offer: RTCSessionDescriptionInit;
+        }
+      | undefined;
+    if (!row?.caller_offer || sessionRef.current) return;
+
+    const { data: caller } = await supabase
+      .from("public_profiles")
+      .select("id,display_name,username,avatar_path,public_avatar_url")
+      .eq("id", row.initiator_id)
+      .maybeSingle();
+    if (!caller || sessionRef.current) return;
+
+    const next: CallSession = {
+      phase: "incoming",
+      callId: row.id,
+      conversationId: row.conversation_id ?? "",
+      peer: caller as CallPeer,
+      kind: row.kind === "video" ? "video" : "voice",
+      isCaller: false,
+      incomingOffer: row.caller_offer,
+      muted: false,
+      cameraOff: false,
+    };
+    sessionRef.current = next;
+    setSession(next);
+    setMinimized(false);
+    setNotice(null);
+  }, [profile]);
+
   const acceptCall = useCallback(async () => {
     const current = sessionRef.current;
     if (!current || current.phase !== "incoming" || !current.incomingOffer) return;
+    // A banner can outlive the caller if the final signal was lost. Never
+    // answer a call the database has already finished.
+    const { data: live } = await supabase
+      .from("calls")
+      .select("status")
+      .eq("id", current.callId)
+      .maybeSingle();
+    if (!live || (live as { status?: string }).status !== "ringing") {
+      setSession(null);
+      sessionRef.current = null;
+      setNotice("This call has already ended.");
+      return;
+    }
     updateSession({ phase: "connecting" });
     try {
       const { pc } = await preparePeer(
@@ -559,13 +668,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       pendingCandidates.current = [];
 
-      await supabase
+      // Claim the call only while it is still ringing. If the caller cancelled
+      // during media setup, do not resurrect it as "accepted".
+      const { data: claimed } = await supabase
         .from("calls")
         .update({
           status: "accepted",
           answered_at: new Date().toISOString(),
         })
-        .eq("id", current.callId);
+        .eq("id", current.callId)
+        .eq("status", "ringing")
+        .select("id");
+      if (!claimed || claimed.length === 0) {
+        teardown("missed");
+        return;
+      }
 
       await supabase
         .from("call_participants")
@@ -586,7 +703,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       );
       teardown("failed");
     }
-  }, [preparePeer, profile?.id, sendSignal, teardown, updateSession]);
+  }, [preparePeer, profile, sendSignal, teardown, updateSession]);
 
   const declineCall = useCallback(() => {
     const current = sessionRef.current;
@@ -684,25 +801,58 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const current = sessionRef.current;
       if (!current || String(payload.call_id) !== current.callId) return;
       const reason = String(payload.reason ?? "ended");
+
+      // The caller hung up (or cancelled) while this device was still ringing:
+      // that is a missed call on this side, never an "incoming" call record.
+      if (current.phase === "incoming") {
+        void supabase
+          .from("calls")
+          .update({
+            status: "missed",
+            ended_at: new Date().toISOString(),
+            end_reason: "no_answer",
+          })
+          .eq("id", current.callId)
+          .eq("status", "ringing");
+        void supabase
+          .from("call_participants")
+          .update({ state: "missed", left_at: new Date().toISOString() })
+          .eq("call_id", current.callId)
+          .eq("user_id", profile?.id ?? "");
+        setSession(null);
+        sessionRef.current = null;
+        setNotice("Missed call.");
+        return;
+      }
+
       teardown(
         reason === "declined" || reason === "busy"
           ? "declined"
-          : reason === "missed"
+          : reason === "missed" || reason === "cancelled"
             ? "missed"
             : "ended",
       );
     },
-    [teardown],
+    [profile?.id, teardown],
   );
 
-  opsRef.current = {
-    invite: handleInvite,
-    answer: (payload) => void handleAnswer(payload),
-    reoffer: (payload) => void handleReoffer(payload),
-    reanswer: (payload) => void handleReanswer(payload),
-    candidate: (payload) => void handleCandidate(payload),
-    remoteEnd: handleRemoteEnd,
-  };
+  useEffect(() => {
+    opsRef.current = {
+      invite: handleInvite,
+      answer: (payload) => void handleAnswer(payload),
+      reoffer: (payload) => void handleReoffer(payload),
+      reanswer: (payload) => void handleReanswer(payload),
+      candidate: (payload) => void handleCandidate(payload),
+      remoteEnd: handleRemoteEnd,
+    };
+  }, [
+    handleAnswer,
+    handleCandidate,
+    handleInvite,
+    handleReanswer,
+    handleReoffer,
+    handleRemoteEnd,
+  ]);
 
   // Inbox: only this user can read `user:<id>`.
   useEffect(() => {
@@ -736,20 +886,47 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
   }, [profile?.id]);
 
+  // A gesture unlocks audio on mobile Chrome/Safari. Without it the incoming
+  // tone cannot start; the banner remains fully usable and says so.
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        ringContextRef.current ??= new AudioContext();
+        void ringContextRef.current.resume().then(() => setRingtoneBlocked(false));
+      } catch {
+        // No Web Audio support.
+      }
+    };
+    window.addEventListener("pointerdown", unlock, { once: true, capture: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock, { capture: true });
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
   // Original locally generated ringback / incoming tone.
   useEffect(() => {
     if (!session) return;
     if (session.phase !== "outgoing" && session.phase !== "incoming") return;
-    let context: AudioContext | null = null;
     let interval: number | null = null;
-    const playTone = () => {
+    let cancelled = false;
+
+    const playTone = async () => {
       try {
-        context ??= new AudioContext();
-        if (context.state === "suspended") void context.resume();
+        const context =
+          ringContextRef.current ??= new AudioContext();
+        if (context.state === "suspended") await context.resume();
+        if (cancelled) return;
+        if (context.state !== "running") {
+          setRingtoneBlocked(true);
+          return;
+        }
+        setRingtoneBlocked(false);
         const now = context.currentTime;
         const gain = context.createGain();
         gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.06, now + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.12, now + 0.03);
         gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
         gain.connect(context.destination);
         const osc = context.createOscillator();
@@ -758,25 +935,73 @@ export function CallProvider({ children }: { children: ReactNode }) {
         osc.connect(gain);
         osc.start(now);
         osc.stop(now + 0.45);
+        if (session.phase === "incoming" && navigator.vibrate) {
+          navigator.vibrate([0, 500, 350, 500]);
+        }
       } catch {
-        // Audio output may be unavailable; signalling continues.
+        // Audio output may be unavailable; the visual banner still rings.
       }
     };
-    playTone();
+
+    void playTone();
     interval = window.setInterval(
-      playTone,
-      session.phase === "incoming" ? 1400 : 3000,
+      () => void playTone(),
+      session.phase === "incoming" ? 2000 : 3000,
     );
     return () => {
+      cancelled = true;
       if (interval) window.clearInterval(interval);
-      void context?.close();
+      if (navigator.vibrate) navigator.vibrate(0);
     };
   }, [session?.phase]);
+
+  // Durable incoming-call delivery: a notification is inserted by Postgres for
+  // the invited participant. This works even when the realtime broadcast invite
+  // was lost, and it is also checked once on mount.
+  useEffect(() => {
+    if (!profile?.id) return;
+    void loadPendingIncoming();
+    void supabase.rpc("pingo_expire_ringing_calls");
+
+    const channel = supabase
+      .channel(`call-inbox:${profile.id}:${crypto.randomUUID()}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          const row = payload.new as { kind?: string } | null;
+          if (row?.kind === "call") void loadPendingIncoming();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [loadPendingIncoming, profile?.id]);
 
   // Ring timeout and duration timer.
   useEffect(() => {
     if (!session) return;
     if (session.phase === "incoming") {
+      const finish = (notice: string) => {
+        const current = sessionRef.current;
+        if (!current) return;
+        void supabase
+          .from("call_participants")
+          .update({ state: "missed", left_at: new Date().toISOString() })
+          .eq("call_id", current.callId)
+          .eq("user_id", profile?.id ?? "");
+        setSession(null);
+        sessionRef.current = null;
+        setNotice(notice);
+      };
+
       const timer = window.setTimeout(() => {
         if (sessionRef.current?.phase !== "incoming") return;
         const current = sessionRef.current;
@@ -788,20 +1013,38 @@ export function CallProvider({ children }: { children: ReactNode }) {
             end_reason: "no_answer",
           })
           .eq("id", current.callId);
-        void supabase
-          .from("call_participants")
-          .update({ state: "missed" })
-          .eq("call_id", current.callId)
-          .eq("user_id", profile?.id ?? "");
         void sendSignal(current.peer.id, "call:end", {
           call_id: current.callId,
           reason: "missed",
         });
-        setSession(null);
-        sessionRef.current = null;
-        setNotice("Missed call.");
+        finish("Missed call.");
       }, 30_000);
-      return () => window.clearTimeout(timer);
+
+      // If the caller cancelled and the final broadcast was lost, the call row
+      // stops being "ringing". Withdraw the banner instead of ringing forever.
+      const poll = window.setInterval(async () => {
+        const current = sessionRef.current;
+        if (!current || current.phase !== "incoming") return;
+        const { data } = await supabase
+          .from("calls")
+          .select("status")
+          .eq("id", current.callId)
+          .maybeSingle();
+        const status = (data as { status?: string } | null)?.status;
+        if (!status || status === "ringing") return;
+        if (status === "accepted") {
+          // Answered on another device with this same account.
+          setSession(null);
+          sessionRef.current = null;
+          return;
+        }
+        finish("Missed call.");
+      }, 4000);
+
+      return () => {
+        window.clearTimeout(timer);
+        window.clearInterval(poll);
+      };
     }
     if (session.phase === "outgoing") {
       const timer = window.setTimeout(() => {
@@ -1044,8 +1287,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
-    if (remoteAudioRef.current && remoteStream && session?.kind === "voice") {
-      remoteAudioRef.current.srcObject = remoteStream;
+    const audio = remoteAudioRef.current;
+    if (audio && remoteStream && session?.kind === "voice") {
+      audio.srcObject = remoteStream;
     }
   }, [
     remoteStream,
@@ -1123,7 +1367,59 @@ export function CallProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {session && !minimized && (
+      {/* Incoming call banner. It is deliberately visible above every page and
+          carries both actions, like WhatsApp/Telegram, instead of a silent bell. */}
+      {session?.phase === "incoming" && (
+        <div
+          role="alertdialog"
+          aria-label={`Incoming ${session.kind} call from ${
+            session.peer.display_name || session.peer.username || "PINGO user"
+          }`}
+          className="safe-top fixed inset-x-3 top-2 z-[75] mx-auto max-w-sm overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        >
+          <div className="flex items-center gap-3 p-3">
+            <span className="relative shrink-0">
+              <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/25" />
+              <UserAvatar profile={session.peer} size="md" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">
+                {session.peer.display_name || session.peer.username || "PINGO user"}
+              </p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                {session.kind === "video" ? (
+                  <VideoIcon className="size-3.5 text-primary" />
+                ) : (
+                  <PhoneIncoming className="size-3.5 text-primary" />
+                )}
+                Incoming {session.kind} call…
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 px-3 pb-3">
+            <Button
+              variant="destructive"
+              className="h-11 gap-2 rounded-xl font-semibold"
+              onClick={declineCall}
+            >
+              <PhoneOff className="size-4" /> Decline
+            </Button>
+            <Button
+              className="h-11 gap-2 rounded-xl bg-emerald-600 font-semibold text-white hover:bg-emerald-500"
+              onClick={() => void acceptCall()}
+            >
+              <Phone className="size-4" /> Accept
+            </Button>
+          </div>
+          {ringtoneBlocked && (
+            <p className="border-t border-border px-3 py-1.5 text-center text-[0.65rem] text-muted-foreground">
+              Tap anywhere to enable the ringtone
+            </p>
+          )}
+        </div>
+      )}
+
+      {session && !minimized && session.phase !== "incoming" && (
         <div className="fixed inset-0 z-[60] flex flex-col bg-[#0d1a22] text-white">
           {session.kind === "voice" && (
             <audio ref={remoteAudioRef} autoPlay className="hidden" />
@@ -1138,13 +1434,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
               <p className="text-xs text-white/60">
                 {reconnecting
                   ? "Reconnecting — keeping the call open…"
-                  : session.phase === "incoming"
-                    ? `Incoming ${session.kind} call`
-                    : session.phase === "outgoing"
-                      ? "Calling…"
-                      : session.phase === "connecting"
-                        ? "Connecting…"
-                        : durationLabel(seconds)}
+                  : session.phase === "outgoing"
+                    ? "Calling…"
+                    : session.phase === "connecting"
+                      ? "Connecting…"
+                      : durationLabel(seconds)}
               </p>
             </div>
             {session.phase === "active" && quality && session.kind === "video" && (
@@ -1190,8 +1484,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                   playsInline
                   className="size-full bg-black object-contain"
                 />
-                {session.phase !== "incoming" &&
-                  (sharingScreen || !session.cameraOff) && (
+                {(sharingScreen || !session.cameraOff) && (
                   <video
                     ref={localVideoRef}
                     autoPlay
@@ -1205,11 +1498,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
               <div className="flex flex-col items-center gap-4 px-6">
                 <UserAvatar profile={session.peer} size="xl" />
                 <p className="text-lg font-semibold">
-                  {session.phase === "active"
-                    ? durationLabel(seconds)
-                    : session.phase === "incoming"
-                      ? "Incoming voice call"
-                      : "Ringing…"}
+                  {session.phase === "active" ? durationLabel(seconds) : "Ringing…"}
                 </p>
                 {session.phase === "active" && (
                   <p className="max-w-xs text-center text-[0.7rem] text-white/50">
@@ -1238,26 +1527,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           </div>
 
           <div className="safe-bottom flex items-center justify-center gap-3 px-4 py-6">
-            {session.phase === "incoming" ? (
-              <>
-                <Button
-                  variant="destructive"
-                  size="lg"
-                  className="h-14 flex-1 rounded-full"
-                  onClick={declineCall}
-                >
-                  <PhoneOff className="size-5" /> Decline
-                </Button>
-                <Button
-                  size="lg"
-                  className="h-14 flex-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-500"
-                  onClick={() => void acceptCall()}
-                >
-                  <Phone className="size-5" /> Accept
-                </Button>
-              </>
-            ) : (
-              <>
+            <>
                 <Button
                   variant="secondary"
                   size="icon"
@@ -1347,8 +1617,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 >
                   <PhoneOff className="size-5" />
                 </Button>
-              </>
-            )}
+            </>
           </div>
         </div>
       )}

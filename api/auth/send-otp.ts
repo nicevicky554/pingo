@@ -5,6 +5,7 @@
  * The code itself never leaves the server: only an HMAC digest is stored.
  */
 
+import { getPhoneVerificationMode } from "../_lib/auth-mode";
 import { rateLimit } from "../_lib/rate-limit";
 import {
   OTP_TTL_SECONDS,
@@ -69,6 +70,35 @@ export default async function handler(req: NodeRequest, res: NodeResponse) {
   }
 
   const { admin } = server;
+  const recovery = body.recovery === true;
+
+  // The administrator-selected mode is enforced here, not only in the UI. In
+  // no-OTP mode a code is still allowed as an explicit recovery path for an
+  // account that already exists; it can never create a new account.
+  if ((await getPhoneVerificationMode(admin)) === "none") {
+    if (!recovery) {
+      res.status(409).json({
+        error:
+          "SMS verification is turned off on this deployment. Sign in with your phone number and PIN.",
+        code: "otp_disabled",
+      });
+      return;
+    }
+    const { data: existing } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("phone", phone)
+      .maybeSingle();
+    if (!existing) {
+      res.status(404).json({
+        error:
+          "No PINGO account uses this number. Create an account with a PIN first.",
+        code: "account_not_found",
+      });
+      return;
+    }
+  }
+
   const code = newCode();
 
   // PostgreSQL-backed throttle: works even when Upstash is not configured, so

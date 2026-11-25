@@ -1,9 +1,12 @@
 import { PageHeader } from "@/components/app/PageHeader";
+import { UserAvatar } from "@/components/UserAvatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
+import { searchPeople } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
+import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -14,11 +17,22 @@ import {
   ImagePlus,
   Loader2,
   Lock,
+  MessageCircle,
+  Search,
+  ShieldCheck,
+  UserPlus,
+  X,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
-const STEPS = ["Identity", "Access", "Review"];
+const STEPS = ["Identity", "Access", "Permissions", "Review"];
+
+function newInviteCode() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(12)))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 export default function CreateChannelPage() {
   const { profile } = useAuth();
@@ -31,6 +45,11 @@ export default function CreateChannelPage() {
   const [photo, setPhoto] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [usernameState, setUsernameState] = useState<"idle" | "free" | "taken">("idle");
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
+  const [admins, setAdmins] = useState<Profile[]>([]);
+  const [adminTerm, setAdminTerm] = useState("");
+  const [adminResults, setAdminResults] = useState<Profile[]>([]);
+  const [inviteCode] = useState(newInviteCode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
@@ -78,7 +97,16 @@ export default function CreateChannelPage() {
         return;
       }
     }
-    setStep((current) => Math.min(2, current + 1));
+    setStep((current) => Math.min(STEPS.length - 1, current + 1));
+  }
+
+  async function searchAdmins(term: string) {
+    setAdminTerm(term);
+    if (!profile || term.trim().length < 2) {
+      setAdminResults([]);
+      return;
+    }
+    setAdminResults(await searchPeople(term, profile.id));
   }
 
   async function create() {
@@ -106,6 +134,8 @@ export default function CreateChannelPage() {
           description: description.trim() || null,
           is_public: isPublic,
           avatar_url: avatarUrl,
+          comments_enabled: commentsEnabled,
+          invite_code: isPublic ? null : inviteCode,
         })
         .select("id")
         .single();
@@ -115,6 +145,19 @@ export default function CreateChannelPage() {
         .from("channel_members")
         .insert({ channel_id: data.id, user_id: profile.id, role: "owner" });
       if (memberError) throw memberError;
+
+      if (admins.length > 0) {
+        const { error: adminError } = await supabase
+          .from("channel_members")
+          .insert(
+            admins.map((person) => ({
+              channel_id: data.id,
+              user_id: person.id,
+              role: "admin",
+            })),
+          );
+        if (adminError) throw adminError;
+      }
 
       navigate(`/app/channels/${data.id}`, { replace: true });
     } catch (err) {
@@ -280,6 +323,121 @@ export default function CreateChannelPage() {
         )}
 
         {step === 2 && (
+          <div className="mt-6 space-y-5">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">
+                Posting and discussion
+              </p>
+              <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={commentsEnabled}
+                  onClick={() => setCommentsEnabled((value) => !value)}
+                  className="flex w-full items-start gap-3 px-4 py-3 text-left"
+                >
+                  <MessageCircle className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">Allow comments</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                      Subscribers can discuss each post. Turn this off for
+                      broadcast-only announcements.
+                    </span>
+                  </span>
+                  <span
+                    className={cn(
+                      "relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors",
+                      commentsEnabled ? "bg-primary" : "bg-input",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 size-4 rounded-full bg-white transition-transform",
+                        commentsEnabled ? "left-4.5" : "left-0.5",
+                      )}
+                    />
+                  </span>
+                </button>
+                <p className="border-t border-border px-4 py-2.5 text-[0.65rem] leading-5 text-muted-foreground">
+                  Only you and channel administrators can publish posts. New
+                  subscribers can react to posts unless you turn comments off.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <UserPlus className="size-3.5" /> Administrators (optional)
+              </p>
+              <div className="mt-2 flex items-center gap-2 rounded-md border border-input px-2.5">
+                <Search className="size-4 text-muted-foreground" />
+                <input
+                  value={adminTerm}
+                  onChange={(event) => void searchAdmins(event.target.value)}
+                  placeholder="Search people by name or @username"
+                  className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
+                />
+              </div>
+              {adminResults.length > 0 && (
+                <div className="mt-1.5 max-h-40 overflow-y-auto rounded-md border border-border bg-card">
+                  {adminResults
+                    .filter(
+                      (person) => !admins.some((admin) => admin.id === person.id),
+                    )
+                    .map((person) => (
+                      <button
+                        key={person.id}
+                        type="button"
+                        onClick={() => {
+                          setAdmins((current) => [...current, person]);
+                          setAdminResults([]);
+                          setAdminTerm("");
+                        }}
+                        className="flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-secondary"
+                      >
+                        <UserAvatar profile={person} size="sm" />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {person.display_name || person.username}
+                        </span>
+                        <span className="shrink-0 text-[0.6rem] text-muted-foreground">
+                          @{person.username}
+                        </span>
+                      </button>
+                    ))}
+                </div>
+              )}
+              {admins.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {admins.map((person) => (
+                    <div
+                      key={person.id}
+                      className="flex items-center gap-2 rounded-md bg-secondary px-2 py-1.5"
+                    >
+                      <ShieldCheck className="size-3.5 text-primary" />
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        {person.display_name || person.username}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdmins((current) =>
+                            current.filter((admin) => admin.id !== person.id),
+                          )
+                        }
+                        aria-label={`Remove ${person.display_name}`}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
           <div className="mt-6">
             <div className="flex items-center gap-3 rounded-lg border border-border p-3.5">
               <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-secondary text-primary">
@@ -300,6 +458,26 @@ export default function CreateChannelPage() {
             {description && (
               <p className="mt-3 text-sm leading-6 text-muted-foreground">{description}</p>
             )}
+            <dl className="mt-3 space-y-1.5 rounded-lg bg-secondary/70 px-3 py-2.5 text-xs">
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Comments</dt>
+                <dd className="font-medium">{commentsEnabled ? "On" : "Off"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Posting</dt>
+                <dd className="font-medium">Owner and admins</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Administrators</dt>
+                <dd className="font-medium">{admins.length}</dd>
+              </div>
+              {!isPublic && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Invite code</dt>
+                  <dd className="font-mono text-[0.65rem]">{inviteCode}</dd>
+                </div>
+              )}
+            </dl>
             <p className="mt-4 text-xs leading-5 text-muted-foreground">
               You become the owner. After creation you can publish posts from the
               channel page. No welcome post is created automatically.
@@ -325,7 +503,7 @@ export default function CreateChannelPage() {
             <ArrowLeft className="size-4" /> Back
           </Button>
         )}
-        {step < 2 ? (
+        {step < STEPS.length - 1 ? (
           <Button className="flex-1 gap-1.5" onClick={() => void next()}>
             Continue <ArrowRight className="size-4" />
           </Button>

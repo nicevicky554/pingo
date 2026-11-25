@@ -76,7 +76,7 @@ export default function CallsPage() {
   }, [profileId]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   useEffect(() => {
@@ -166,6 +166,24 @@ export default function CallsPage() {
                 : outgoing
                   ? PhoneOutgoing
                   : PhoneIncoming;
+              // The DB status decides the label. A row is only "Incoming" when
+              // the call actually arrived and was not missed/declined/cancelled.
+              const outcome =
+                call.status === "missed"
+                  ? outgoing
+                    ? "No answer"
+                    : "Missed call"
+                  : call.status === "declined"
+                    ? outgoing
+                      ? "Declined"
+                      : "Declined call"
+                    : call.status === "cancelled"
+                      ? "Cancelled"
+                      : call.status === "failed"
+                        ? "Failed"
+                        : outgoing
+                          ? "Outgoing"
+                          : "Incoming";
               return (
                 <div key={call.id} className="flex items-center gap-3 p-3.5">
                   <UserAvatar profile={person} size="sm" />
@@ -179,14 +197,14 @@ export default function CallsPage() {
                           missed ? "size-3.5 text-destructive" : "size-3.5 text-primary"
                         }
                       />
-                      {outgoing ? "Outgoing" : "Incoming"} ·{" "}
+                      {outcome} ·{" "}
                       {new Date(call.started_at).toLocaleString([], {
                         day: "2-digit",
                         month: "short",
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
-                      {call.duration_seconds
+                      {call.duration_seconds && call.duration_seconds > 0
                         ? ` · ${durationLabel(call.duration_seconds)}`
                         : ""}
                     </p>

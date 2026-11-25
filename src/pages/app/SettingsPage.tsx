@@ -132,6 +132,10 @@ export default function SettingsPage() {
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinNotice, setPinNotice] = useState<string | null>(null);
 
   const primaryInput = useRef<HTMLInputElement>(null);
   const fallbackInput = useRef<HTMLInputElement>(null);
@@ -705,6 +709,84 @@ export default function SettingsPage() {
                   Sign out here
                 </Button>
               </div>
+            </section>
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="text-sm font-bold">Account PIN or password</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Set a PIN (6–12 digits) or password (8+ characters) for this
+                account. On deployments where SMS verification is turned off, this
+                credential is how you sign back in. It is stored only as a hash by
+                Supabase Auth; PINGO never sees it again.
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <Input
+                  type="password"
+                  value={pin}
+                  onChange={(event) => setPin(event.target.value)}
+                  placeholder="New PIN or password"
+                  autoComplete="new-password"
+                  className="h-9"
+                />
+                <Input
+                  type="password"
+                  value={pinConfirm}
+                  onChange={(event) => setPinConfirm(event.target.value)}
+                  placeholder="Repeat it"
+                  autoComplete="new-password"
+                  className="h-9"
+                />
+              </div>
+              {pinNotice && (
+                <p className="mt-2 text-xs font-medium text-primary">{pinNotice}</p>
+              )}
+              <Button
+                size="sm"
+                className="mt-3 gap-1.5"
+                disabled={pinBusy || pin.length < 6}
+                onClick={async () => {
+                  if (pin !== pinConfirm) {
+                    setPinNotice("The two entries do not match.");
+                    return;
+                  }
+                  setPinBusy(true);
+                  setPinNotice(null);
+                  try {
+                    const { data } = await supabase.auth.getSession();
+                    const token = data.session?.access_token;
+                    if (!token) throw new Error("Sign in again first.");
+                    const response = await fetch("/api/auth/set-credential", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                      },
+                      body: JSON.stringify({ credential: pin }),
+                    });
+                    const payload = (await response.json().catch(() => null)) as {
+                      error?: string;
+                    } | null;
+                    if (!response.ok) {
+                      throw new Error(
+                        response.status === 404
+                          ? "The PINGO server route is not available on this host."
+                          : payload?.error ?? "The PIN could not be saved.",
+                      );
+                    }
+                    setPin("");
+                    setPinConfirm("");
+                    setPinNotice("Saved. Use this PIN when you sign in.");
+                  } catch (err) {
+                    setPinNotice(
+                      err instanceof Error ? err.message : "The PIN could not be saved.",
+                    );
+                  } finally {
+                    setPinBusy(false);
+                  }
+                }}
+              >
+                {pinBusy && <Loader2 className="size-3.5 animate-spin" />}
+                Save PIN
+              </Button>
             </section>
             <section className="rounded-xl border border-border bg-card p-5">
               <h2 className="text-sm font-bold">Read receipts</h2>

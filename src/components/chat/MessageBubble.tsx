@@ -29,6 +29,8 @@ import {
   MoreHorizontal,
   Pause,
   Pencil,
+  Pin,
+  PinOff,
   Play,
   Reply,
   SmilePlus,
@@ -528,6 +530,8 @@ export function MessageBubble({
   onBlock,
   onRetry,
   onForward,
+  onTogglePin,
+  pinned,
   showAvatar,
 }: {
   message: Message;
@@ -550,6 +554,8 @@ export function MessageBubble({
   onBlock?: () => void;
   onRetry?: () => void;
   onForward?: () => void;
+  onTogglePin?: () => void;
+  pinned?: boolean;
   showAvatar: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -841,6 +847,16 @@ export function MessageBubble({
               {onForward && (
                 <DropdownMenuItem onSelect={onForward}>
                   <Forward className="size-4" /> Forward
+                </DropdownMenuItem>
+              )}
+              {onTogglePin && (
+                <DropdownMenuItem onSelect={onTogglePin}>
+                  {pinned ? (
+                    <PinOff className="size-4" />
+                  ) : (
+                    <Pin className="size-4" />
+                  )}
+                  {pinned ? "Unpin message" : "Pin message"}
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
