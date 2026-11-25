@@ -41,7 +41,6 @@ import {
   Smile,
   Square,
   UserRound,
-  Video,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -93,48 +92,6 @@ async function extractPeaks(blob: Blob): Promise<number[]> {
   } catch {
     return [];
   }
-}
-
-function SelectedAttachment({
-  file,
-  onRemove,
-}: {
-  file: File;
-  onRemove: () => void;
-}) {
-  const [url] = useState(() =>
-    file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
-  );
-  useEffect(() => {
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [url]);
-
-  return (
-    <div className="relative w-[104px] shrink-0 overflow-hidden rounded-lg border border-border bg-secondary/60">
-      {url ? (
-        <img src={url} alt={file.name} className="h-[76px] w-full object-cover" />
-      ) : (
-        <div className="flex h-[76px] items-center justify-center">
-          <Paperclip className="size-5 text-muted-foreground" />
-        </div>
-      )}
-      <p className="truncate px-1.5 pt-1 text-[0.6rem]">{file.name}</p>
-      <p className="px-1.5 pb-1 text-[0.55rem] text-muted-foreground">
-        {file.type.split("/").pop()?.toUpperCase() || "FILE"} ·{" "}
-        {(file.size / 1024 / 1024).toFixed(1)} MB
-      </p>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${file.name}`}
-        className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white"
-      >
-        <X className="size-3" />
-      </button>
-    </div>
-  );
 }
 
 export function Composer({
