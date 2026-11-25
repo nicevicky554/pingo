@@ -10,10 +10,10 @@
 import {
   credentialError,
   normalizeCredential,
-} from "../_lib/auth-mode";
-import { readJsonBody } from "../_lib/otp";
-import { rateLimit } from "../_lib/rate-limit";
-import { serverSupabase } from "../_lib/supabase";
+} from "../_lib/auth-mode.js";
+import { readJsonBody } from "../_lib/otp.js";
+import { rateLimit } from "../_lib/rate-limit.js";
+import { serverSupabase } from "../_lib/supabase.js";
 
 type NodeRequest = {
   method?: string;

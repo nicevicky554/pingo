@@ -5,8 +5,8 @@
  * The code itself never leaves the server: only an HMAC digest is stored.
  */
 
-import { getPhoneVerificationMode } from "../_lib/auth-mode";
-import { rateLimit } from "../_lib/rate-limit";
+import { getPhoneVerificationMode } from "../_lib/auth-mode.js";
+import { rateLimit } from "../_lib/rate-limit.js";
 import {
   OTP_TTL_SECONDS,
   clientIp,
@@ -16,7 +16,7 @@ import {
   readJsonBody,
   sendWhatsAppCode,
   serverSupabase,
-} from "../_lib/otp";
+} from "../_lib/otp.js";
 
 type NodeRequest = {
   method?: string;

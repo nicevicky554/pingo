@@ -10,8 +10,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { rateLimit } from "../_lib/rate-limit";
-import { serverSupabase } from "../_lib/supabase";
+import { rateLimit } from "../_lib/rate-limit.js";
+import { serverSupabase } from "../_lib/supabase.js";
 
 type NodeRequest = {
   method?: string;

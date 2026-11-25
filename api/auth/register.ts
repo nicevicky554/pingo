@@ -17,10 +17,10 @@ import {
   getPhoneVerificationMode,
   normalizeCredential,
   phoneCredentialEmail,
-} from "../_lib/auth-mode";
-import { normalizePhone, readJsonBody } from "../_lib/otp";
-import { rateLimit } from "../_lib/rate-limit";
-import { pickEnv, serverSupabase } from "../_lib/supabase";
+} from "../_lib/auth-mode.js";
+import { normalizePhone, readJsonBody } from "../_lib/otp.js";
+import { rateLimit } from "../_lib/rate-limit.js";
+import { pickEnv, serverSupabase } from "../_lib/supabase.js";
 
 type NodeRequest = {
   method?: string;

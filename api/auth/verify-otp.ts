@@ -6,8 +6,8 @@
  * their existing auth.users row, so they continue straight into the app.
  */
 
-import { getPhoneVerificationMode } from "../_lib/auth-mode";
-import { rateLimit } from "../_lib/rate-limit";
+import { getPhoneVerificationMode } from "../_lib/auth-mode.js";
+import { rateLimit } from "../_lib/rate-limit.js";
 import {
   MAX_OTP_ATTEMPTS,
   clientIp,
@@ -19,7 +19,7 @@ import {
   readJsonBody,
   sameHash,
   serverSupabase,
-} from "../_lib/otp";
+} from "../_lib/otp.js";
 
 type NodeRequest = {
   method?: string;

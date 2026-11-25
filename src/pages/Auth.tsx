@@ -139,17 +139,20 @@ export default function AuthPage() {
       if (response.status === 400 || response.status === 429) {
         throw new Error(payload?.error ?? "Could not send the code.");
       }
-      // WhatsApp delivery or the API route is unavailable in this environment
-      // (including previews where /api is not served). Fall back to the
-      // Supabase SMS provider so sign-in is never a dead end.
+      // Delivery failed or the route is missing. PINGO never falls back to
+      // Supabase's SMS phone provider: it is usually disabled, which surfaced
+      // as "Unsupported phone provider". Report the real server error instead.
+      throw new Error(
+        payload?.error ??
+          (response.status === 404
+            ? "Code delivery is not available on this host. The PINGO server routes (/api/auth) are not deployed here."
+            : "Could not send your code. Try again shortly."),
+      );
     }
 
-    const { error: smsError } = await supabase.auth.signInWithOtp({
-      phone: targetValue,
-      options: { shouldCreateUser: true },
-    });
-    if (smsError) throw smsError;
-    return { channel: "sms" };
+    throw new Error(
+      "Could not reach the PINGO sign-in service. Check your connection and try again.",
+    );
   }
 
   async function sendCode(event?: React.FormEvent) {
@@ -201,13 +204,6 @@ export default function AuthPage() {
         const { error: authError } = await supabase.auth.verifyOtp({
           token_hash: payload.token_hash,
           type: "magiclink",
-        });
-        if (authError) throw authError;
-      } else {
-        const { error: authError } = await supabase.auth.verifyOtp({
-          phone: fullPhone,
-          token: otp,
-          type: "sms",
         });
         if (authError) throw authError;
       }

@@ -16,7 +16,7 @@ import {
 } from "node:crypto";
 import { type SupabaseClient, type User } from "@supabase/supabase-js";
 
-export { serverSupabase } from "./supabase";
+export { serverSupabase } from "./supabase.js";
 
 export const OTP_TTL_SECONDS = Math.min(
   900,
@@ -262,11 +262,15 @@ async function getUserIdByPhone(admin: SupabaseClient, phone: string) {
       perPage: 200,
     });
     if (error) break;
-    const match = data.users.find(
-      (user) => user.phone?.replace(/\D/g, "") === digits,
+    // `data.users` is typed through the untyped client; narrow it explicitly so
+    // the find callback keeps a real `User` shape instead of collapsing to never.
+    const users: User[] = data?.users ?? [];
+    const match = users.find(
+      (candidate: User) =>
+        (candidate.phone ?? "").replace(/\D/g, "") === digits,
     );
     if (match) return match;
-    if (data.users.length < 200) break;
+    if (users.length < 200) break;
   }
   return null;
 }

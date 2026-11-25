@@ -5,7 +5,7 @@
  * removes the Storage object and clears the message's attachment reference so
  * it cannot be fetched again from chat history.
  */
-import { serverSupabase } from "../_lib/supabase";
+import { serverSupabase } from "../_lib/supabase.js";
 
 type NodeRequest = {
   method?: string;
